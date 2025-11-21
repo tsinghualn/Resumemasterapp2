@@ -54,10 +54,9 @@ interface ResumeData {
 export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigateToJobDesc }: ResumeUploaderProps) {
   const [fileName, setFileName] = useState<string>('');
   const [isDragging, setIsDragging] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isParsing, setIsParsing] = useState(false);
-  const [parsingProgress, setParsingProgress] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false); // Combined processing state
+  const [progress, setProgress] = useState(0); // Unified progress
+  const [progressStage, setProgressStage] = useState<'uploading' | 'parsing' | 'finalizing'>('uploading');
   const [isComplete, setIsComplete] = useState(false);
   const [parsedData, setParsedData] = useState<ResumeData | null>(null);
   const [resumeContent, setResumeContent] = useState<string>('');
@@ -65,14 +64,15 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
 
   // AI-powered parsing
   const parseResumeWithAI = async (text: string) => {
-    setIsParsing(true);
-    setParsingProgress(0);
+    // Set parsing stage (30-90%)
+    setProgressStage('parsing');
+    setProgress(30);
     
-    // Smooth progress animation for parsing
+    // Smooth progress animation for parsing (30% to 90%)
     const parsingInterval = setInterval(() => {
-      setParsingProgress((prev) => {
-        if (prev >= 90) return prev;
-        return prev + 3;
+      setProgress((prev) => {
+        if (prev >= 85) return prev; // Stop at 85%
+        return prev + 2;
       });
     }, 200);
     
@@ -96,37 +96,47 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
       const result = await response.json();
 
       clearInterval(parsingInterval);
-      setParsingProgress(100);
-
+      
       if (response.ok && result.success) {
         console.log('✅ [ResumeUploader] AI parsing successful!');
         console.log('📋 [ResumeUploader] PARSED RESUME DATA:', JSON.stringify(result.data, null, 2));
-        console.log('👤 [ResumeUploader] Parsed Name:', result.data.name);
-        console.log('📧 [ResumeUploader] Parsed Contact:', result.data.contact);
-        console.log('💼 [ResumeUploader] Parsed Experience:', result.data.experience);
-        console.log('🎓 [ResumeUploader] Parsed Education:', result.data.education);
-        console.log('🛠️ [ResumeUploader] Parsed Skills:', result.data.skills);
         
         setParsedData(result.data);
-        setIsParsing(false); // End parsing state
-        setIsComplete(true);
-        toast.success('Resume parsed successfully!', {
-          description: 'You can now proceed to AI Resume Building or Tailor for Job',
-          duration: 3000,
-        });
+        
+        // Move to finalizing stage (90-100%)
+        setProgressStage('finalizing');
+        setProgress(90);
+        
+        // Quick progress to 100%
+        const finalizingInterval = setInterval(() => {
+          setProgress((prev) => {
+            if (prev >= 100) {
+              clearInterval(finalizingInterval);
+              // Set complete and show buttons
+              setIsProcessing(false);
+              setIsComplete(true);
+              toast.success('Resume ready!', {
+                description: 'You can now proceed to AI Resume Building or Tailor for Job',
+                duration: 3000,
+              });
+              return 100;
+            }
+            return prev + 5;
+          });
+        }, 100);
       } else {
         console.warn('⚠️ [ResumeUploader] AI parsing failed:', result.error);
         toast.error('Failed to parse resume. Please try again.');
-        setIsParsing(false);
-        setParsingProgress(0);
+        setIsProcessing(false);
+        setProgress(0);
         setIsComplete(false);
       }
     } catch (error) {
       console.error('❌ [ResumeUploader] AI parsing error:', error);
       clearInterval(parsingInterval);
       toast.error('Failed to parse resume. Please try again.');
-      setIsParsing(false);
-      setParsingProgress(0);
+      setIsProcessing(false);
+      setProgress(0);
       setIsComplete(false);
     }
   };
@@ -148,22 +158,23 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
     }
 
     setFileName(file.name);
-    setIsUploading(true);
-    setUploadProgress(0);
+    setIsProcessing(true);
+    setProgressStage('uploading');
+    setProgress(0);
 
-    // Smooth progress animation for upload
+    // Smooth progress animation for upload (0-30%)
     const progressInterval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 90) return prev;
-        return prev + 5;
+      setProgress((prev) => {
+        if (prev >= 25) return prev; // Stop at 25%
+        return prev + 2;
       });
     }, 100);
 
     // Add timeout to prevent indefinite hanging
     const timeoutId = setTimeout(() => {
       clearInterval(progressInterval);
-      setIsUploading(false);
-      setUploadProgress(0);
+      setIsProcessing(false);
+      setProgress(0);
       toast.error('Upload timeout. Please try again or use a different file format.');
     }, 30000); // 30 second timeout
 
@@ -174,11 +185,10 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
       reader.onload = (e) => {
         const content = e.target?.result as string;
         
-        // Complete the upload progress
+        // Complete the upload progress to 30%
         clearTimeout(timeoutId);
         clearInterval(progressInterval);
-        setUploadProgress(100);
-        setIsUploading(false);
+        setProgress(30);
         
         console.log('📄 TXT file loaded, content length:', content.length);
         
@@ -186,9 +196,9 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
         setResumeContent(content);
         
         // Show success message
-        toast.success(`Great job! We have uploaded "${file.name}" successfully.`, {
-          description: 'We are now parsing your resume. Please be patient...',
-          duration: 4000,
+        toast.success(`Uploaded "${file.name}" successfully!`, {
+          description: 'AI is now parsing your resume...',
+          duration: 3000,
         });
 
         // Start AI parsing
@@ -198,8 +208,8 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
       reader.onerror = () => {
         clearTimeout(timeoutId);
         clearInterval(progressInterval);
-        setIsUploading(false);
-        setUploadProgress(0);
+        setIsProcessing(false);
+        setProgress(0);
         toast.error('Failed to read file. Please try again.');
       };
       
@@ -514,11 +524,10 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
           
           console.log('✅ PDF parsing complete with advanced structure detection');
           
-          // Complete the upload progress
+          // Complete the upload progress to 30%
           clearTimeout(timeoutId);
           clearInterval(progressInterval);
-          setUploadProgress(100);
-          setIsUploading(false);
+          setProgress(30);
           
           console.log('📄 PDF file loaded, content length:', fullText.trim().length);
           
@@ -526,9 +535,9 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
           setResumeContent(fullText.trim());
           
           // Show success message
-          toast.success(`Great job! We have uploaded "${file.name}" successfully.`, {
-            description: 'We are now parsing your resume. Please be patient...',
-            duration: 4000,
+          toast.success(`Uploaded "${file.name}\" successfully!`, {
+            description: 'AI is now parsing your resume...',
+            duration: 3000,
           });
 
           // Start AI parsing
@@ -537,8 +546,8 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
           console.error('❌ Error parsing PDF:', error);
           clearTimeout(timeoutId);
           clearInterval(progressInterval);
-          setIsUploading(false);
-          setUploadProgress(0);
+          setIsProcessing(false);
+          setProgress(0);
           toast.error('Failed to parse PDF. Please try a TXT file or different PDF.');
         }
       };
@@ -546,8 +555,8 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
       reader.onerror = () => {
         clearTimeout(timeoutId);
         clearInterval(progressInterval);
-        setIsUploading(false);
-        setUploadProgress(0);
+        setIsProcessing(false);
+        setProgress(0);
         toast.error('Failed to read PDF file. Please try again.');
       };
       
@@ -556,8 +565,8 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
       // For DOCX files, we'll need a library. For now, show a helpful message
       clearTimeout(timeoutId);
       clearInterval(progressInterval);
-      setIsUploading(false);
-      setUploadProgress(0);
+      setIsProcessing(false);
+      setProgress(0);
       toast.warning('DOCX parsing not yet supported', {
         description: 'Please convert your resume to PDF or TXT format for now'
       });
@@ -642,7 +651,7 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
     <Card className="p-6">
       <h2 className="text-xl mb-4">Upload Resume</h2>
       
-      {!fileName && !isUploading && !isParsing && !isComplete ? (
+      {!fileName && !isProcessing && !isComplete ? (
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -686,26 +695,26 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
             </div>
 
             {/* Upload Progress */}
-            {isUploading && (
+            {isProcessing && progressStage === 'uploading' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-blue-700 font-medium">Uploading...</span>
-                  <span className="text-blue-900 font-semibold">{uploadProgress}%</span>
+                  <span className="text-blue-900 font-semibold">{progress}%</span>
                 </div>
-                <Progress value={uploadProgress} className="h-3" />
+                <Progress value={progress} className="h-3" />
               </div>
             )}
 
             {/* Parsing Progress */}
-            {isParsing && !isComplete && (
+            {isProcessing && progressStage === 'parsing' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-purple-700 font-medium">
                     🤖 AI is parsing your resume...
                   </span>
-                  <span className="text-purple-900 font-semibold">{parsingProgress}%</span>
+                  <span className="text-purple-900 font-semibold">{progress}%</span>
                 </div>
-                <Progress value={parsingProgress} className="h-3 bg-purple-100" />
+                <Progress value={progress} className="h-3 bg-purple-100" />
                 <p className="text-xs text-purple-600 mt-2">
                   Please be patient. This may take a few moments.
                 </p>

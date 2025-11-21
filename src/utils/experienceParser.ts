@@ -125,12 +125,28 @@ export function parseExperience(text: string): Experience[] {
   
   for (const line of lines) {
     const trimmed = line.trim();
-    // Check if this line starts a new job entry (starts with ** but NOT a bullet point)
-    if (trimmed.startsWith('**') && !trimmed.startsWith('• **') && !trimmed.startsWith('* **') && !trimmed.startsWith('- **')) {
-      // This is a new job header
-      if (currentBlock) {
+    // Check if this line starts a new job entry or company header (starts with ** but NOT a bullet point)
+    // NEW: Don't split on bold text within descriptions or bullet points
+    const isBoldHeader = trimmed.startsWith('**') && !trimmed.startsWith('• **') && !trimmed.startsWith('* **') && !trimmed.startsWith('- **');
+    
+    if (isBoldHeader && currentBlock) {
+      // Check if current block should start a new entry
+      // If the previous bold header was just a company name (no dates/pipes), merge it with this block
+      const firstLine = currentBlock.trim().split('\n')[0];
+      const isCompanyOnly = firstLine.startsWith('**') && 
+                            !firstLine.includes('|') && 
+                            !firstLine.match(/\d{4}/) && 
+                            !firstLine.match(/\d{1,2}\/\d{4}/);
+      
+      if (!isCompanyOnly) {
         jobBlocks.push(currentBlock);
+        currentBlock = line;
+      } else {
+        // This was a company header, merge with next block
+        currentBlock += '\n' + line;
       }
+    } else if (isBoldHeader) {
+      // First bold header
       currentBlock = line;
     } else {
       // This is part of the current job description
@@ -143,6 +159,7 @@ export function parseExperience(text: string): Experience[] {
   }
   
   let currentCompany = ''; // Track company for multiple roles at same company
+  let currentLocation = ''; // Track location for multiple roles at same company
   
   jobBlocks.forEach((block, index) => {
     if (!block.trim()) return;
@@ -151,24 +168,50 @@ export function parseExperience(text: string): Experience[] {
     if (lines.length === 0) return;
     
     // First line contains the header (usually bold with **)
-    const headerLine = lines[0].replace(/\*\*/g, '').trim();
+    // SPECIAL CASE: Handle "**Company**     Location" (location on same line with lots of spaces)
+    // Example: "**Expedia Group**                    Seattle, WA"
+    let headerLine = lines[0].replace(/\*\*/g, '').trim();
+    let extractedLocation = '';
     
-    // Check if this is a standalone company name (no pipes, no dates, no commas)
-    // Pattern: **Google** (company only, followed by job titles in subsequent blocks)
+    // Check if header has multiple spaces (indicating location might be right-aligned)
+    if (headerLine.match(/\s{2,}/)) {
+      const parts = headerLine.split(/\s{2,}/); // Split by 2+ spaces
+      if (parts.length === 2) {
+        // Check if second part looks like a location (City, ST or City)
+        const secondPart = parts[1].trim();
+        const locationPattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:,\s*[A-Z]{2,})?|Remote|Hybrid)$/;
+        if (locationPattern.test(secondPart)) {
+          extractedLocation = secondPart;
+          headerLine = parts[0].trim(); // First part is the actual header
+        }
+      }
+    }
+    
+    // Check if this is a standalone company name (no pipes, no dates, no commas except in location)
+    // Pattern: **Google** or **Expedia Group**     Seattle, WA (company only, followed by job titles in subsequent blocks)
     const hasNoPipe = !headerLine.includes('|');
-    const hasNoComma = !headerLine.includes(',');
     const hasNoDate = !headerLine.match(/\d{4}/) && !headerLine.match(/\d{1,2}\/\d{4}/);
     
-    if (hasNoPipe && hasNoComma && hasNoDate && lines.length === 1) {
+    // More robust company detection: 
+    // - No pipe separator
+    // - No date
+    // - Either: (a) single line with just company, or (b) company + location on same line with spaces
+    const isCompanyHeader = hasNoPipe && hasNoDate && (
+      lines.length === 1 || // Just company name line
+      (extractedLocation && lines.length === 1) // Company + location on same line
+    );
+    
+    if (isCompanyHeader) {
       // This is just a company name header for multiple roles
       currentCompany = headerLine;
+      currentLocation = extractedLocation; // Save location from company header
       return; // Skip to next block which should contain the job title
     }
     
     // Parse the header line
     let title = '';
     let company = currentCompany; // Use tracked company if available
-    let location = '';
+    let location = extractedLocation || currentLocation; // Use extracted or tracked location
     let startDate = '';
     let endDate = '';
     let current = false;
@@ -197,12 +240,12 @@ export function parseExperience(text: string): Experience[] {
         const parts = headerWithoutDate.split('|').map(p => p.trim()).filter(p => p);
         title = parts[0] || '';
         if (!company) company = parts[1] || '';
-        location = parts[2] || '';
+        if (!location) location = parts[2] || '';
       } else if (headerWithoutDate.includes(',')) {
         const parts = headerWithoutDate.split(',').map(p => p.trim()).filter(p => p);
         title = parts[0] || '';
         if (!company) company = parts[1] || '';
-        location = parts[2] || '';
+        if (!location) location = parts[2] || '';
       } else {
         // Just the title
         title = headerWithoutDate;
@@ -213,12 +256,12 @@ export function parseExperience(text: string): Experience[] {
         const parts = headerLine.split('|').map(p => p.trim());
         title = parts[0] || '';
         if (!company) company = parts[1] || '';
-        location = parts[2] || '';
+        if (!location) location = parts[2] || '';
       } else if (headerLine.includes(',')) {
         const parts = headerLine.split(',').map(p => p.trim());
         title = parts[0] || '';
         if (!company) company = parts[1] || '';
-        location = parts[2] || '';
+        if (!location) location = parts[2] || '';
       } else {
         title = headerLine;
       }
@@ -242,6 +285,26 @@ export function parseExperience(text: string): Experience[] {
         
         // Check for location pattern (City, ST or City, State or just City)
         if (!location) {
+          // First, check if line contains BOTH company and location
+          // Pattern: "Company Name    City, ST" (multiple spaces separate them)
+          if (line.match(/\s{2,}/)) {
+            const parts = line.split(/\s{2,}/); // Split by 2+ spaces
+            if (parts.length >= 2) {
+              const lastPart = parts[parts.length - 1].trim();
+              // Check if last part looks like a location
+              const locationPattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:,\s*[A-Z]{2,})?|Remote|Hybrid)$/;
+              if (locationPattern.test(lastPart)) {
+                location = lastPart;
+                // If we don't have a company yet, the first parts might be the company
+                if (!company && parts.length === 2) {
+                  company = parts[0].trim();
+                }
+                continue;
+              }
+            }
+          }
+          
+          // Otherwise, check if the entire line is a location
           // Match patterns like: "Seattle, WA", "New York, NY", "San Francisco, CA", "Remote", "Seattle"
           const locationPattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:,\s*[A-Z]{2,})?|Remote|Hybrid)$/;
           if (locationPattern.test(line)) {
@@ -263,6 +326,19 @@ export function parseExperience(text: string): Experience[] {
       // Skip if this is the location we already extracted
       if (location && l === location) return false;
       
+      // Skip if line contains company + location (with multiple spaces)
+      if (l.match(/\s{2,}/)) {
+        const parts = l.split(/\s{2,}/);
+        if (parts.length >= 2) {
+          const lastPart = parts[parts.length - 1].trim();
+          const locationPattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:,\s*[A-Z]{2,})?|Remote|Hybrid)$/;
+          if (locationPattern.test(lastPart)) {
+            // This line is company + location, skip it
+            return false;
+          }
+        }
+      }
+      
       // Skip if it looks like a location
       const locationPattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:,\s*[A-Z]{2,})?|Remote|Hybrid)$/;
       if (locationPattern.test(l) && !location) {
@@ -274,7 +350,9 @@ export function parseExperience(text: string): Experience[] {
     });
     const description = descriptionLines.join('\n').trim();
     
-    if (title || company || description) {
+    // CRITICAL FIX: Only create an experience entry if there's actual content (description)
+    // Skip entries that are just company headers with no job description
+    if (description && (title || company)) {
       experiences.push({
         id: `exp-${Date.now()}-${index}-${Math.random()}`,
         title: title || 'Untitled Position',

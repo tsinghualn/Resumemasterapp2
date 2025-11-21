@@ -47,12 +47,12 @@ function parseDate(dateStr: string): { start: string; end: string; current: bool
     };
   }
   
-  // Pattern 3: Just year(s)
-  const yearPattern = /(\d{4})\s*[-–—to]*\s*(\d{4}|current|present|ongoing|expected)?/i;
-  const yearMatch = cleanDate.match(yearPattern);
-  if (yearMatch) {
-    const start = yearMatch[1];
-    const end = yearMatch[2] || '';
+  // Pattern 3: Just year(s) with a range separator or "current"
+  const yearRangePattern = /(\d{4})\s*[-–—to]+(\d{4}|current|present|ongoing|expected)/i;
+  const yearRangeMatch = cleanDate.match(yearRangePattern);
+  if (yearRangeMatch) {
+    const start = yearRangeMatch[1];
+    const end = yearRangeMatch[2] || '';
     return {
       start,
       end: isCurrent ? '' : end,
@@ -60,10 +60,12 @@ function parseDate(dateStr: string): { start: string; end: string; current: bool
     };
   }
   
-  // Pattern 4: Single date (just end date, like "Dec. 2020")
-  const singleDatePattern = /(\w{3,9}\.?\s+\d{4}|\d{1,2}\/\d{4}|\d{4})/i;
+  // Pattern 4: Single date (just end date, like "Dec. 2020" or "2020")
+  // This should match when there's NO range separator
+  const singleDatePattern = /^(\w{3,9}\.?\s+\d{4}|\d{1,2}\/\d{4}|\d{4})$/i;
   const singleMatch = cleanDate.match(singleDatePattern);
-  if (singleMatch) {
+  if (singleMatch && !cleanDate.includes('-') && !cleanDate.includes('–') && !cleanDate.includes('—') && !/to/i.test(cleanDate)) {
+    // Single date without "current/present/expected" or range indicators = graduation/end date
     return {
       start: '',
       end: formatDate(singleMatch[1]),
@@ -126,7 +128,10 @@ export function parseEducation(text: string): Education[] {
   
   // Split by bold markdown patterns OR by lines that start at the same indentation level
   // This handles both **University, Degree, Date** and same-level items like "AI Related:"
-  const eduBlocks = text.split(/(?=\*\*[^\n]+\*\*)|(?=^[A-Z][\w\s]+:$)/m);
+  // The pattern matches:
+  // 1. Lines starting with ** (bold markdown for main entries)
+  // 2. Lines starting with capital letter and ending with : (headers like "AI Related:")
+  const eduBlocks = text.split(/(?=^\*\*[^\n]+\*\*)|(?=^[A-Z][\w\s]+:\s*$)/m);
   
   eduBlocks.forEach((block, index) => {
     if (!block.trim()) return;

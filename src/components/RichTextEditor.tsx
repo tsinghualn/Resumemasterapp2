@@ -223,6 +223,23 @@ export function RichTextEditor({
         [contenteditable] li {
           margin-bottom: 2px;
         }
+        /* Main level bullets - filled circles */
+        [contenteditable] > ul > li {
+          list-style-type: disc;
+        }
+        /* Second level bullets - hollow circles */
+        [contenteditable] ul ul > li {
+          list-style-type: circle;
+        }
+        /* Third level bullets - squares */
+        [contenteditable] ul ul ul > li {
+          list-style-type: square;
+        }
+        /* Nested lists spacing */
+        [contenteditable] li > ul,
+        [contenteditable] li > ol {
+          margin-top: 2px;
+        }
         [contenteditable] b,
         [contenteditable] strong {
           font-weight: 600;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -7,6 +7,8 @@ import { Textarea } from './ui/textarea';
 import { parseExperience } from '../utils/experienceParser';
 import { parseEducation } from '../utils/educationParser';
 import { RichTextEditor } from './RichTextEditor';
+import { AIImproveDialog } from './AIImproveDialog';
+import { processHTMLBulletsWithFormatting, processHTMLWithNesting } from '../utils/htmlBulletProcessor';
 import { 
   Select,
   SelectContent,
@@ -17,6 +19,7 @@ import {
 import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
 import { Alert, AlertDescription } from './ui/alert';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -89,6 +92,7 @@ interface ResumeData {
     current: boolean;
   }>;
   skills: string[];
+  skillsRichText?: string;
   links: Array<{
     id: string;
     label: string;
@@ -132,8 +136,21 @@ export function AIRewritePanel({
   const [showAdditionalDetails, setShowAdditionalDetails] = useState(false);
   const [showReorderDialog, setShowReorderDialog] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [highlightSettings, setHighlightSettings] = useState(false);
+  
+  // Refs for scrolling to settings
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const industryToneRef = useRef<HTMLButtonElement>(null);
+  const rewriteStyleRef = useRef<HTMLButtonElement>(null);
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
   const [showPhotoDialog, setShowPhotoDialog] = useState(false);
+  
+  // AI Improve dialog state
+  const [improveDialogOpen, setImproveDialogOpen] = useState(false);
+  const [improveDialogContent, setImproveDialogContent] = useState('');
+  const [improveDialogSectionType, setImproveDialogSectionType] = useState<'summary' | 'experience' | 'education' | 'skills' | 'custom'>('summary');
+  const [improveDialogIsList, setImproveDialogIsList] = useState(false);
+  const [improveDialogCallback, setImproveDialogCallback] = useState<((content: string) => void) | null>(null);
   
   const [resumeData, setResumeData] = useState<ResumeData>({
     personalDetails: {
@@ -156,6 +173,7 @@ export function AIRewritePanel({
     experience: [],
     education: [],
     skills: [],
+    skillsRichText: '',
     links: [],
     customSections: []
   });
@@ -178,6 +196,13 @@ export function AIRewritePanel({
       parseResumeFromText(originalResume);
     }
   }, [originalResume, cachedParsedData]);
+
+  // Scroll to settings section when panel opens and either field is not selected
+  useEffect(() => {
+    if (!industryTone || !rewriteStyle) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
 
   // Auto-optimize with AI when settings change
   useEffect(() => {
@@ -211,6 +236,7 @@ export function AIRewritePanel({
       experience: parseExperience(data.experience || ''),
       education: parseEducation(data.education || ''),
       skills: parseSkills(data.skills || ''),
+      skillsRichText: data.skills || '',
       links: parseLinks(fullText),
       customSections: parseCustomSections(fullText)
     };
@@ -248,6 +274,7 @@ export function AIRewritePanel({
       experience: parseExperience(text),
       education: parseEducation(text),
       skills: parseSkills(text),
+      skillsRichText: '',
       links: parseLinks(text),
       customSections: parseCustomSections(text)
     };
@@ -784,6 +811,57 @@ export function AIRewritePanel({
     setDraggedItem(null);
   };
 
+  // Navigate to settings when AI button clicked without selections
+  const navigateToSettings = () => {
+    // Show settings section
+    setShowSettings(true);
+    
+    // Scroll to settings
+    setTimeout(() => {
+      settingsRef.current?.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'start' 
+      });
+      
+      // Highlight settings with animation
+      setHighlightSettings(true);
+      
+      // Remove highlight after animation
+      setTimeout(() => {
+        setHighlightSettings(false);
+      }, 2000);
+      
+      // Focus on the first missing field
+      setTimeout(() => {
+        if (!industryTone && industryToneRef.current) {
+          industryToneRef.current.click();
+        } else if (!rewriteStyle && rewriteStyleRef.current) {
+          rewriteStyleRef.current.click();
+        }
+      }, 300);
+    }, 100);
+    
+    // Show toast message
+    toast.info('Please select Industry Tone and Rewrite Style', {
+      description: 'These settings are required to use AI optimization',
+      duration: 3000
+    });
+  };
+
+  // AI Improve dialog handlers
+  const openImproveDialog = (
+    content: string,
+    sectionType: 'summary' | 'experience' | 'education' | 'skills' | 'custom',
+    isList: boolean,
+    callback: (improvedContent: string) => void
+  ) => {
+    setImproveDialogContent(content);
+    setImproveDialogSectionType(sectionType);
+    setImproveDialogIsList(isList);
+    setImproveDialogCallback(() => callback);
+    setImproveDialogOpen(true);
+  };
+
   const toggleSectionVisibility = (id: string) => {
     setSectionOrder(prev =>
       prev.map(section =>
@@ -799,13 +877,6 @@ export function AIRewritePanel({
 
   // Navigate to next section
   const handleNextSection = () => {
-    // Prevent navigation if Industry Tone or Rewrite Style is not set
-    if (!industryTone || !rewriteStyle) {
-      alert('Please select both Industry Tone and Rewrite Style before continuing.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    
     const visibleSections = getNavigationItems();
     const currentIndex = visibleSections.findIndex(s => s.type === currentSection);
     if (currentIndex < visibleSections.length - 1) {
@@ -957,8 +1028,13 @@ export function AIRewritePanel({
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Settings Panel */}
-      {showSettings && (!industryTone || !rewriteStyle) && (
-        <div className="bg-white border-b shadow-sm p-6">
+      {showSettings && (
+        <div 
+          ref={settingsRef}
+          className={`bg-white border-b shadow-sm p-6 transition-all duration-500 ${
+            highlightSettings ? 'ring-4 ring-amber-400 ring-offset-2 bg-amber-50' : ''
+          }`}
+        >
           <div className="max-w-7xl mx-auto">
             <div className="flex items-center gap-3 mb-4">
               <Sparkles className="w-5 h-5 text-blue-600" />
@@ -976,10 +1052,16 @@ export function AIRewritePanel({
 
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="industry-tone">Industry Tone</Label>
+                <Label htmlFor="industry-tone" className="text-sm mb-2 inline-block">
+                  Industry Tone <span className="text-red-500">*</span>
+                </Label>
                 <Select value={industryTone} onValueChange={setIndustryTone}>
-                  <SelectTrigger id="industry-tone">
-                    <SelectValue placeholder="Select industry tone" />
+                  <SelectTrigger 
+                    ref={industryToneRef}
+                    id="industry-tone" 
+                    className={!industryTone ? 'border-2 border-amber-400 ring-2 ring-amber-200' : ''}
+                  >
+                    <SelectValue placeholder="Select an industry tone..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="professional">Professional</SelectItem>
@@ -988,12 +1070,24 @@ export function AIRewritePanel({
                     <SelectItem value="executive">Executive</SelectItem>
                   </SelectContent>
                 </Select>
+                {!industryTone && (
+                  <div className="flex items-start gap-2 mt-2 text-sm text-amber-700">
+                    <span className="text-amber-500">⚠</span>
+                    <span>Please select an industry tone to begin optimization</span>
+                  </div>
+                )}
               </div>
               <div>
-                <Label htmlFor="rewrite-style">Rewrite Style</Label>
+                <Label htmlFor="rewrite-style" className="text-sm mb-2 inline-block">
+                  Rewrite Style <span className="text-red-500">*</span>
+                </Label>
                 <Select value={rewriteStyle} onValueChange={setRewriteStyle}>
-                  <SelectTrigger id="rewrite-style">
-                    <SelectValue placeholder="Select rewrite style" />
+                  <SelectTrigger 
+                    ref={rewriteStyleRef}
+                    id="rewrite-style" 
+                    className={!rewriteStyle ? 'border-2 border-amber-400 ring-2 ring-amber-200' : ''}
+                  >
+                    <SelectValue placeholder="Select a rewrite style..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="concise">Concise</SelectItem>
@@ -1002,9 +1096,15 @@ export function AIRewritePanel({
                     <SelectItem value="achievement">Achievement-focused</SelectItem>
                   </SelectContent>
                 </Select>
+                {!rewriteStyle && (
+                  <div className="flex items-start gap-2 mt-2 text-sm text-amber-700">
+                    <span className="text-amber-500">⚠</span>
+                    <span>Please select a rewrite style to begin optimization</span>
+                  </div>
+                )}
               </div>
             </div>
-            
+
             {isOptimizing && (
               <div className="mt-4 flex items-center gap-2 text-blue-600">
                 <Sparkles className="w-4 h-4 animate-pulse" />
@@ -1014,6 +1114,12 @@ export function AIRewritePanel({
           </div>
         </div>
       )}
+
+      {/* Review Note */}
+      <div className="px-6 py-3 flex items-center gap-2 text-blue-600">
+        <FileText className="w-4 h-4" />
+        <span className="text-sm">Review and edit each section of your resume. Make sure all information is accurate before proceeding to optimization.</span>
+      </div>
 
       <div className="flex h-[calc(100vh-80px)]">
         {/* Left Sidebar Navigation */}
@@ -1037,11 +1143,6 @@ export function AIRewritePanel({
                   <button
                     key={item.id}
                     onClick={() => {
-                      if (!industryTone || !rewriteStyle) {
-                        alert('Please select both Industry Tone and Rewrite Style before continuing.');
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                        return;
-                      }
                       setCurrentSection(item.type);
                     }}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
@@ -1269,7 +1370,31 @@ export function AIRewritePanel({
                   </div>
 
                   <div>
-                    <Label htmlFor="summary">Summary</Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="summary">Summary</Label>
+                      {resumeData.summary && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                          onClick={() => {
+                            if (industryTone && rewriteStyle) {
+                              openImproveDialog(
+                                resumeData.summary,
+                                'summary',
+                                false,
+                                (improvedContent) => updateSummary(improvedContent)
+                              );
+                            } else {
+                              navigateToSettings();
+                            }
+                          }}
+                        >
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          Improve with AI
+                        </Button>
+                      )}
+                    </div>
                     <RichTextEditor
                       value={resumeData.summary}
                       onChange={(value) => updateSummary(value)}
@@ -1355,23 +1480,47 @@ export function AIRewritePanel({
                                 placeholder="Dec 2023"
                                 disabled={exp.current}
                               />
-                              {index === 0 && (
-                                <label className="flex items-center gap-2 text-sm">
-                                  <input
-                                    type="checkbox"
-                                    checked={exp.current}
-                                    onChange={(e) => updateExperience(exp.id, 'current', e.target.checked)}
-                                    className="rounded"
-                                  />
-                                  Currently working here
-                                </label>
-                              )}
+                              <label className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={exp.current}
+                                  onChange={(e) => updateExperience(exp.id, 'current', e.target.checked)}
+                                  className="rounded"
+                                />
+                                Currently working here
+                              </label>
                             </div>
                           </div>
                         </div>
 
                         <div>
-                          <Label>Description</Label>
+                          <div className="flex items-center justify-between mb-2">
+                            <Label>Description</Label>
+                            {exp.description && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                                onClick={() => {
+                                  if (industryTone && rewriteStyle) {
+                                    // Check if description contains bullets
+                                    const hasBullets = exp.description.includes('•') || exp.description.includes('<li>');
+                                    openImproveDialog(
+                                      exp.description,
+                                      'experience',
+                                      hasBullets,
+                                      (improvedContent) => updateExperience(exp.id, 'description', improvedContent)
+                                    );
+                                  } else {
+                                    navigateToSettings();
+                                  }
+                                }}
+                              >
+                                <Sparkles className="w-4 h-4 mr-2" />
+                                Improve with AI
+                              </Button>
+                            )}
+                          </div>
                           <RichTextEditor
                             value={exp.description}
                             onChange={(value) => updateExperience(exp.id, 'description', value)}
@@ -1474,7 +1623,32 @@ export function AIRewritePanel({
                         </div>
 
                         <div>
-                          <Label>Details (GPA, honors, coursework)</Label>
+                          <div className="flex items-center justify-between mb-2">
+                            <Label>Details (GPA, honors, coursework)</Label>
+                            {edu.details && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                                onClick={() => {
+                                  if (industryTone && rewriteStyle) {
+                                    const hasBullets = edu.details.includes('•') || edu.details.includes('<li>');
+                                    openImproveDialog(
+                                      edu.details,
+                                      'education',
+                                      hasBullets,
+                                      (improvedContent) => updateEducation(edu.id, 'details', improvedContent)
+                                    );
+                                  } else {
+                                    navigateToSettings();
+                                  }
+                                }}
+                              >
+                                <Sparkles className="w-4 h-4 mr-2" />
+                                        Improve with AI
+                                      </Button>
+                            )}
+                          </div>
                           <RichTextEditor
                             value={edu.details}
                             onChange={(value) => updateEducation(edu.id, 'details', value)}
@@ -1499,18 +1673,48 @@ export function AIRewritePanel({
                   <div>
                     <h2>Skills</h2>
                     <p className="text-gray-600 mt-2">
-                      List your relevant skills and competencies (one per line).
+                      List your relevant skills and competencies. You can use bullet points or organize by category.
                     </p>
                   </div>
-                  <Textarea
-                    value={resumeData.skills.join('\n')}
-                    onChange={(e) => setResumeData(prev => ({
-                      ...prev,
-                      skills: e.target.value.split('\n').map(s => s.trim()).filter(s => s)
-                    }))}
-                    placeholder="JavaScript\nReact\nNode.js\nPython\nSQL"
-                    rows={10}
-                  />
+                  <div>
+                    {resumeData.skillsRichText && (
+                      <div className="flex justify-end mb-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                          onClick={() => {
+                            if (industryTone && rewriteStyle) {
+                              const hasBullets = resumeData.skillsRichText.includes('•') || resumeData.skillsRichText.includes('<li>');
+                              openImproveDialog(
+                                resumeData.skillsRichText,
+                                'skills',
+                                hasBullets,
+                                (improvedContent) => setResumeData(prev => ({
+                                  ...prev,
+                                  skillsRichText: improvedContent
+                                }))
+                              );
+                            } else {
+                              navigateToSettings();
+                            }
+                          }}
+                        >
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          Improve with AI
+                        </Button>
+                      </div>
+                    )}
+                    <RichTextEditor
+                      value={typeof resumeData.skillsRichText === 'string' ? resumeData.skillsRichText : resumeData.skills.join('\n')}
+                      onChange={(value) => setResumeData(prev => ({
+                        ...prev,
+                        skillsRichText: value
+                      }))}
+                      placeholder="• JavaScript, TypeScript, Python\n• React, Node.js, Express\n• SQL, MongoDB, PostgreSQL"
+                      minHeight="200px"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1578,7 +1782,32 @@ export function AIRewritePanel({
                     </div>
 
                     <div>
-                      <Label>Content</Label>
+                      <div className="flex items-center justify-between mb-2">
+                        <Label>Content</Label>
+                        {section.content && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                            onClick={() => {
+                              if (industryTone && rewriteStyle) {
+                                const hasBullets = section.content.includes('•') || section.content.includes('<li>');
+                                openImproveDialog(
+                                  section.content,
+                                  'custom',
+                                  hasBullets,
+                                  (improvedContent) => updateCustomSection(section.id, 'content', improvedContent)
+                                );
+                              } else {
+                                navigateToSettings();
+                              }
+                            }}
+                          >
+                            <Sparkles className="w-4 h-4 mr-2" />
+                            Improve with AI
+                          </Button>
+                        )}
+                      </div>
                       <RichTextEditor
                         value={section.content}
                         onChange={(value) => updateCustomSection(section.id, 'content', value)}
@@ -1697,13 +1926,30 @@ export function AIRewritePanel({
 
                     case 'summary':
                       if (!resumeData.summary) return null;
+                      const processedSummary = processHTMLWithNesting(resumeData.summary);
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-2 uppercase">Professional Summary</h3>
-                          <div 
-                            className="text-sm text-gray-700 leading-relaxed"
-                            dangerouslySetInnerHTML={{ __html: resumeData.summary }}
-                          />
+                          <div className="text-sm text-gray-700 leading-relaxed">
+                            {processedSummary.map((item, idx) => {
+                              const indent = item.indent || 0;
+                              const marginLeft = indent * 24;
+                              
+                              if (item.type === 'bullet') {
+                                const bulletChar = item.bulletStyle === 'hollow' ? '○' : '•';
+                                return (
+                                  <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
+                                    <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                    <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+                                  </div>
+                                );
+                              } else {
+                                return (
+                                  <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
+                                );
+                              }
+                            })}
+                          </div>
                         </div>
                       );
 
@@ -1712,21 +1958,40 @@ export function AIRewritePanel({
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-3 uppercase">Employment History</h3>
-                          {resumeData.experience.map((exp) => (
-                            <div key={exp.id} className="mb-4">
-                              <div className="font-medium text-sm">{exp.title}</div>
-                              <div className="text-sm text-gray-600">
-                                {exp.company}{exp.location && ` | ${exp.location}`}
+                          {resumeData.experience.map((exp) => {
+                            const processedContent = processHTMLWithNesting(exp.description);
+                            return (
+                              <div key={exp.id} className="mb-4">
+                                <div className="font-medium text-sm">{exp.title}</div>
+                                <div className="text-sm text-gray-600">
+                                  {exp.company}{exp.location && ` | ${exp.location}`}
+                                </div>
+                                <div className="text-xs text-gray-500 mb-2">
+                                  {exp.startDate} - {exp.current ? 'Present' : exp.endDate}
+                                </div>
+                                <div className="text-sm text-gray-700">
+                                  {processedContent.map((item, idx) => {
+                                    const indent = item.indent || 0;
+                                    const marginLeft = indent * 24;
+                                    
+                                    if (item.type === 'bullet') {
+                                      const bulletChar = item.bulletStyle === 'hollow' ? '○' : '•';
+                                      return (
+                                        <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
+                                          <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                          <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+                                        </div>
+                                      );
+                                    } else {
+                                      return (
+                                        <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
+                                      );
+                                    }
+                                  })}
+                                </div>
                               </div>
-                              <div className="text-xs text-gray-500 mb-2">
-                                {exp.startDate} - {exp.current ? 'Present' : exp.endDate}
-                              </div>
-                              <div 
-                                className="text-sm text-gray-700"
-                                dangerouslySetInnerHTML={{ __html: exp.description }}
-                              />
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       );
 
@@ -1735,33 +2000,79 @@ export function AIRewritePanel({
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-3 uppercase">Education</h3>
-                          {resumeData.education.map((edu) => (
-                            <div key={edu.id} className="mb-3">
-                              <div className="font-medium text-sm">{edu.degree}</div>
-                              <div className="text-sm text-gray-600">
-                                {edu.institution}{edu.location && ` | ${edu.location}`}
+                          {resumeData.education.map((edu) => {
+                            const processedDetails = edu.details ? processHTMLWithNesting(edu.details) : [];
+                            return (
+                              <div key={edu.id} className="mb-3">
+                                <div className="font-medium text-sm">{edu.degree}</div>
+                                <div className="text-sm text-gray-600">
+                                  {edu.institution}{edu.location && ` | ${edu.location}`}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {edu.startDate} - {edu.current ? 'Present' : edu.endDate}
+                                </div>
+                                {processedDetails.length > 0 && (
+                                  <div className="text-sm text-gray-700 mt-1">
+                                    {processedDetails.map((item, idx) => {
+                                      const indent = item.indent || 0;
+                                      const marginLeft = indent * 24;
+                                      
+                                      if (item.type === 'bullet') {
+                                        const bulletChar = item.bulletStyle === 'hollow' ? '○' : '•';
+                                        return (
+                                          <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
+                                            <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                            <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+                                          </div>
+                                        );
+                                      } else {
+                                        return (
+                                          <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
+                                        );
+                                      }
+                                    })}
+                                  </div>
+                                )}
                               </div>
-                              <div className="text-xs text-gray-500">
-                                {edu.startDate} - {edu.current ? 'Present' : edu.endDate}
-                              </div>
-                              {edu.details && (
-                                <div 
-                                  className="text-sm text-gray-700 mt-1"
-                                  dangerouslySetInnerHTML={{ __html: edu.details }}
-                                />
-                              )}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       );
 
                     case 'skills':
-                      if (resumeData.skills.length === 0) return null;
+                      const skillsContent = resumeData.skillsRichText || resumeData.skills.join('\n');
+                      if (!skillsContent) return null;
+                      const processedSkills = processHTMLWithNesting(skillsContent);
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-2 uppercase">Skills</h3>
                           <div className="text-sm text-gray-700">
-                            {resumeData.skills.join(' • ')}
+                            {processedSkills.map((item, idx) => {
+                              const indent = item.indent || 0;
+                              const marginLeft = indent * 24; // 24px per indent level
+                              
+                              if (item.type === 'bullet') {
+                                // Determine bullet character based on style
+                                let bulletChar = '•';
+                                if (item.bulletStyle === 'hollow') {
+                                  bulletChar = '○'; // Hollow circle for sub-items
+                                } else if (item.bulletStyle === 'filled') {
+                                  bulletChar = '•'; // Filled circle for main items
+                                }
+                                // For numbered lists, use CSS counter instead
+                                
+                                return (
+                                  <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
+                                    <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                    <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+                                  </div>
+                                );
+                              } else {
+                                return (
+                                  <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
+                                );
+                              }
+                            })}
                           </div>
                         </div>
                       );
@@ -1783,13 +2094,22 @@ export function AIRewritePanel({
                       // Find the custom section that matches this section.id
                       const customSection = resumeData.customSections.find(cs => cs.id === section.id);
                       if (!customSection || !customSection.content) return null;
+                      const processedCustomContent = processHTMLBulletsWithFormatting(customSection.content);
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-2 uppercase">{customSection.title}</h3>
-                          <div 
-                            className="text-sm text-gray-700"
-                            dangerouslySetInnerHTML={{ __html: customSection.content }}
-                          />
+                          <div className="text-sm text-gray-700">
+                            {processedCustomContent.map((item, idx) => (
+                              item.type === 'bullet' ? (
+                                <div key={idx} className="flex items-start gap-2 mb-1">
+                                  <span className="text-gray-600 mt-0.5">•</span>
+                                  <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+                                </div>
+                              ) : (
+                                <div key={idx} className="mb-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+                              )
+                            ))}
+                          </div>
                         </div>
                       );
 
@@ -1853,6 +2173,23 @@ export function AIRewritePanel({
           updatePersonalDetails('photoUrl', photoUrl);
           setShowPhotoDialog(false);
         }}
+      />
+
+      {/* AI Improve Dialog */}
+      <AIImproveDialog
+        open={improveDialogOpen}
+        onClose={() => setImproveDialogOpen(false)}
+        content={improveDialogContent}
+        sectionType={improveDialogSectionType}
+        industryTone={industryTone}
+        rewriteStyle={rewriteStyle}
+        jobDescription={jobDescription}
+        onAccept={(improvedContent) => {
+          if (improveDialogCallback) {
+            improveDialogCallback(improvedContent);
+          }
+        }}
+        isList={improveDialogIsList}
       />
     </div>
   );

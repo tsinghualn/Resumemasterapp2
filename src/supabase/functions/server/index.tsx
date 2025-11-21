@@ -284,10 +284,15 @@ EXTRACTION RULES - COPY TEXT EXACTLY, WORD-FOR-WORD:
   * Jobs with "Present" or "Current" should appear FIRST
   * Then sort by end year: 2024 before 2023, 2023 before 2022, etc.
   * Example order: "2023-Present" → "2021-2024" → "2019-2021" → "2017-2019"
-  * Job titles, companies, dates - EXACT COPIES (only the ORDER changes)
+  * Job titles, companies, dates, locations - EXACT COPIES (only the ORDER changes)
   * ALL bullet points - COMPLETE, UNMODIFIED COPIES
   * Do NOT paraphrase, summarize, or shorten
   * STOP at next section header
+  * 🚨 LOCATION EXTRACTION: Each job may have a location (City, State or City, Country)
+  * Locations typically appear after company name or dates: "Google, Seattle, WA" or "Google | San Francisco, CA | 2020-2023"
+  * ALWAYS extract and include location if present in the format: **Job Title | Company | Dates | Location**
+  * Common formats: "at Google, Seattle", "Google, San Francisco, CA", "Meta | New York, NY", "Amazon, Remote"
+  * If location comes AFTER dates in the line, still extract it: "Software Engineer | Google | 2020-2023, Seattle, WA" → **Software Engineer | Google | 2020-2023 | Seattle, WA**
   
   🚨 CRITICAL - KEEP JOB ENTRIES INTACT (EACH JOB = TITLE + ITS OWN BULLETS):
   * Each job entry has TWO parts: (1) Job Title/Company line (2) ALL its bullet points
@@ -339,9 +344,34 @@ EXTRACTION RULES - COPY TEXT EXACTLY, WORD-FOR-WORD:
   * Include ALL degrees, schools, dates, GPAs, honors, minors, concentrations - COMPLETE EXACT COPIES
   * If coursework/courses appear under Education (no separate COURSES header) - include EVERY SINGLE COURSE EXACTLY as listed
   * Copy ALL bullet points, ALL course names, ALL course codes, ALL descriptions - NOTHING can be left out
-  * CRITICAL: "AI related:" and "ML related:" labels are followed by MULTIPLE LINES - copy ALL those lines completely
-  * CRITICAL: After "AI related:" you may see projects, certifications, training spanning 3-5+ lines - copy EVERY LINE
-  * Example: "AI related:\nLine 1: Self-driven project details...\nLine 2: AWS Certified course...\nLine 3: GitHub training" - copy ALL lines
+  * 
+  * 🚨 CRITICAL: DETECTING MULTIPLE EDUCATION ENTRIES:
+  * If you see text at the SAME LEFT INDENTATION as the university name, it's a NEW education entry
+  * Example pattern (TWO separate entries):
+    **University of Wisconsin-Madison, M.S. in Computer Sciences, Dec. 2020**
+    • Course 1, Course 2, Course 3
+    **AI Related:**
+    • Self-driven project: Build SysDesign Companion
+    • Ultimate AWS Certified AI Practitioner
+  * In this example, "AI Related:" is at the SAME indentation as "University of Wisconsin-Madison" → This is Education Entry #2
+  * "AI Related:" is in BOLD and has its own bullet list → Treat as separate entry
+  * Format as TWO entries separated by blank line:
+    **University of Wisconsin-Madison, M.S. in Computer Sciences, Dec. 2020**
+    • Course 1, Course 2, Course 3
+    
+    **AI Related:**
+    • Self-driven project: Build SysDesign Companion
+    • Ultimate AWS Certified AI Practitioner
+  * 
+  * KEY SIGNALS that indicate a NEW education entry (not a sub-item):
+    - Text is at the SAME left indentation as the first education entry
+    - Text is in BOLD formatting (not a bullet point)
+    - Text has its own bullet-pointed list underneath
+    - Text appears AFTER the previous entry's bullet points are complete
+  * 
+  * Examples of SEPARATE entries: "AI Related:", "ML Related:", "Certifications:", "Online Courses:", "Professional Development:"
+  * If these appear at the same indentation as university names and are bold, treat them as NEW education entries
+  * 
   * Education sections are often VERY LONG with many courses - extract EVERYTHING word-for-word until the next section header
   * Do NOT truncate or summarize the course list - copy the COMPLETE list verbatim
   * Multi-line content after category labels MUST be included in full - scan ALL lines until the next major header
@@ -361,10 +391,29 @@ EXTRACTION RULES - COPY TEXT EXACTLY, WORD-FOR-WORD:
   * Do NOT paraphrase descriptions
   * Keep each project's title with its own description/bullets
   
-- "skills": COPY VERBATIM:
+- "skills": COPY VERBATIM with INDENTATION PRESERVED:
   * Copy ALL skills exactly as listed
   * Preserve exact order and grouping
   * Do NOT reorganize or reorder
+  * 🚨 CRITICAL - PRESERVE NESTED STRUCTURE: If skills are organized in nested lists (main categories with sub-items), you MUST preserve the hierarchy
+  * Detection: Look for indentation patterns - if some bullet points are indented more than others, this indicates a nested structure
+  * Common pattern: "Technologies & Tools:" (main bullet) followed by indented sub-items like "    • Node.js, ReactJS" and "    • GitHub Copilot, AWS"
+  * Representation: Use special markers to preserve indentation:
+    - Main level bullets: Just "• Skill name" (no extra indentation)
+    - Sub-level bullets (indented): Add 4 spaces before the bullet "    • Sub-skill name"
+    - If original uses different bullet styles (filled vs hollow circles), preserve them if possible
+  * Example transformation:
+    Input (with visual indentation):
+    "• Technologies & Tools:
+        ○ Node.js, ReactJS, Angular
+        ○ GitHub Copilot, AWS
+     • Skills: AI prompt engineering"
+    
+    Output (preserve with spaces):
+    "• Technologies & Tools:
+        • Node.js, ReactJS, Angular
+        • GitHub Copilot, AWS
+    • Skills: AI prompt engineering"
   
 - "summary": COPY VERBATIM:
   * Copy every word exactly
@@ -1761,6 +1810,144 @@ Optimize this resume section to better match the job description while following
   } catch (error) {
     console.error('Error optimizing resume:', error);
     return c.json({ error: `Optimization failed: ${error.message}` }, 500);
+  }
+});
+
+// Improve content endpoint - for individual bullet points or full sections
+app.post("/make-server-bc1c5df9/improve-content", async (c) => {
+  try {
+    console.log('✨ Improve-content endpoint called');
+    const { content, sectionType, industryTone, rewriteStyle, jobDescription, isBulletPoint } = await c.req.json();
+
+    if (!content) {
+      return c.json({ error: 'Content is required' }, 400);
+    }
+
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    
+    if (!openaiKey) {
+      return c.json({ 
+        error: 'OpenAI API key not configured. Please add your OPENAI_API_KEY in the environment variables.' 
+      }, 500);
+    }
+    
+    if (!openaiKey.startsWith('sk-')) {
+      return c.json({ 
+        error: 'OpenAI API key appears invalid. Please check your OPENAI_API_KEY value.' 
+      }, 500);
+    }
+    
+    console.log(`Improving ${isBulletPoint ? 'bullet point' : 'section'}: ${sectionType}`);
+
+    // Build dynamic prompt based on tone and style
+    const toneInstructions = {
+      none: 'Use natural, professional language without any specific tone emphasis.',
+      professional: 'Use professional and formal language. Focus on industry-standard terminology.',
+      creative: 'Use creative and dynamic language. Be innovative with word choice while staying professional.',
+      technical: 'Use technical and precise language. Include specific technical terms and methodologies.',
+      executive: 'Use executive and strategic language. Focus on leadership and high-level business outcomes.'
+    };
+
+    const styleInstructions = {
+      none: 'Maintain a natural writing style.',
+      concise: 'Keep the content concise and brief. Remove unnecessary words.',
+      detailed: 'Provide detailed and comprehensive descriptions.',
+      balanced: 'Balance detail with brevity.',
+      achievement: 'Focus heavily on achievements and measurable results.'
+    };
+
+    const toneGuidance = toneInstructions[industryTone as keyof typeof toneInstructions] || toneInstructions.none;
+    const styleGuidance = styleInstructions[rewriteStyle as keyof typeof styleInstructions] || styleInstructions.none;
+
+    const systemPrompt = `You are an expert resume writer specializing in ATS-optimized content.
+
+TONE: ${toneGuidance}
+
+STYLE: ${styleGuidance}
+
+${isBulletPoint ? 'TASK: Improve a single resume bullet point.' : 'TASK: Improve a resume section.'}
+
+CRITICAL INSTRUCTIONS:
+- Return ONLY the improved content itself
+- Do NOT include phrases like "Here's the improved version" or "Improved:"
+- Do NOT include any commentary, explanations, or meta-text
+- Simply provide the improved content that can directly replace the original
+${isBulletPoint ? '- Return only ONE bullet point (do NOT add a bullet symbol, just the text)\n- Keep it as a single line' : ''}
+${jobDescription ? '- Incorporate relevant keywords from the job description naturally\n- Highlight skills and experiences that match the job requirements' : ''}
+
+Your task is to improve the content using strong action verbs, quantifying achievements where possible, and making it more impactful.`;
+
+    const userPrompt = jobDescription 
+      ? `Job Description:\n${jobDescription}\n\nContent to improve:\n${content}\n\nImprove this content to better match the job description while following the tone and style guidelines. ${isBulletPoint ? 'Return only the improved text without a bullet symbol.' : ''}`
+      : `Content to improve:\n${content}\n\nImprove this content following the tone and style guidelines. ${isBulletPoint ? 'Return only the improved text without a bullet symbol.' : ''}`;
+
+    // Call OpenAI API
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: isBulletPoint ? 200 : 1000
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('OpenAI API error:', errorData);
+      
+      if (errorData.error?.code === 'insufficient_quota') {
+        return c.json({
+          error: 'OpenAI API quota exceeded',
+          details: 'Please add credits at https://platform.openai.com/settings/organization/billing',
+          errorCode: 'OPENAI_QUOTA_EXCEEDED'
+        }, 402);
+      }
+      
+      return c.json({ error: `AI improvement failed: ${errorData.error?.message || 'Unknown error'}` }, 500);
+    }
+
+    const data = await response.json();
+    let improvedContent = data.choices[0]?.message?.content || content;
+    
+    // Clean up any unwanted phrases
+    const unwantedPhrases = [
+      /^Here'?s? (the )?improved (version|content|text|bullet):?\\s*/i,
+      /^Improved:?\\s*/i,
+      /^Updated:?\\s*/i,
+      /^\\*\\*Improved.*?\\*\\*:?\\s*/i,
+      /^•\s*/,  // Remove bullet if AI added it
+      /^-\s*/,  // Remove dash if AI added it
+    ];
+    
+    for (const phrase of unwantedPhrases) {
+      improvedContent = improvedContent.replace(phrase, '');
+    }
+    
+    improvedContent = improvedContent.trim();
+    
+    console.log('✅ Content improved successfully');
+
+    return c.json({ 
+      success: true,
+      improvedContent
+    });
+  } catch (error) {
+    console.error('Error improving content:', error);
+    return c.json({ error: `Content improvement failed: ${error.message}` }, 500);
   }
 });
 
