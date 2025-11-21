@@ -78,6 +78,7 @@ export default function App() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [showEmailVerification, setShowEmailVerification] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState('');
+  const [parseResumeDialogOpen, setParseResumeDialogOpen] = useState(false);
   
   const [resumeContent, setResumeContent] = useState<string>('');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -135,7 +136,6 @@ export default function App() {
 
   const handleGetStarted = async (mode: 'upload' | 'scratch') => {
     setStartMode(mode);
-    setCurrentScreen('upload');
     
     if (mode === 'scratch') {
       // Start with a blank template
@@ -188,6 +188,9 @@ SKILLS
       }
       
       setCurrentScreen('parsed');
+    } else {
+      // Upload mode - open the dialog
+      setParseResumeDialogOpen(true);
     }
   };
 
@@ -735,6 +738,40 @@ CERTIFICATIONS
           onSignupSuccess={handleSignupSuccess}
           onOpenSignIn={handleOpenSignIn}
         />
+        
+        {/* Upload and Parse Resume Dialog */}
+        <Dialog open={parseResumeDialogOpen} onOpenChange={setParseResumeDialogOpen}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-2.5 rounded-xl">
+                  <FileText className="w-6 h-6 text-white" />
+                </div>
+                <DialogTitle className="text-2xl">Upload and Parse Resume</DialogTitle>
+              </div>
+              <DialogDescription>
+                Upload your resume file and our AI will automatically parse and structure your information
+              </DialogDescription>
+            </DialogHeader>
+            <div className="mt-4">
+              <ResumeUploader 
+                key="resume-uploader-dialog" 
+                onResumeUpload={(content, fileName, parsedData) => {
+                  handleResumeUpload(content, fileName, parsedData);
+                  setParseResumeDialogOpen(false);
+                }}
+                onNavigateToOptimize={() => {
+                  setCurrentScreen('optimize');
+                  setParseResumeDialogOpen(false);
+                }}
+                onNavigateToJobDesc={() => {
+                  setCurrentScreen('jobdesc');
+                  setParseResumeDialogOpen(false);
+                }}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
       </>
     );
   }
@@ -931,7 +968,7 @@ CERTIFICATIONS
                 <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-3 rounded-xl">
                   <FileText className="w-8 h-8 text-white" />
                 </div>
-                <h1 className="text-4xl">AI Resume Optimizer</h1>
+                <h1 className="text-4xl">Upload and Parse Resume</h1>
               </div>
 
               <div className="flex items-center gap-2">
@@ -977,20 +1014,6 @@ CERTIFICATIONS
               </Dialog>
             </div>
           </div>
-
-          {/* Progress Steps */}
-          <ProgressSteps 
-            currentStep={getCurrentStep()} 
-            steps={['Upload Resume', 'Edit Sections', 'Job Description', 'Optimize']} 
-          />
-
-          {!isAuthenticated && (
-            <div className="mt-6 mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-800 text-center">
-                💡 <strong>Tip:</strong> You can use all AI features without signing in! Sign in to save your resumes and access them later.
-              </p>
-            </div>
-          )}
 
           <div className="mt-8">
             <ResumeUploader 
