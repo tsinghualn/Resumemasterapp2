@@ -1061,7 +1061,7 @@ export function AIRewritePanel({
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 text-gray-700"
               >
                 <Plus className="w-4 h-4" />
-                <span className="text-sm">Additional section</span>
+                <span className="text-sm">Additional Section</span>
               </button>
             </div>
           </ScrollArea>
