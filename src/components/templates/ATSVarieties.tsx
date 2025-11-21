@@ -83,6 +83,7 @@ export function ATSVariety({ content, variety }: ATSVarietyProps) {
           {Object.entries(parsedData.sections).map(([sectionName, sectionContent]: [string, any]) => {
             const upper = sectionName.toUpperCase();
             const isExperienceType = upper.includes('EXPERIENCE') || upper.includes('EMPLOYMENT') || upper.includes('PROJECT');
+            const isSkillsType = upper.includes('SKILLS') || upper.includes('COMPETENCIES');
             return (
               <div key={sectionName} className="mb-8">
                 <h2 className="text-xl font-bold text-gray-900 mb-3 pb-1 border-b-2 border-gray-800 uppercase">{sectionName}</h2>
@@ -105,6 +106,16 @@ export function ATSVariety({ content, variety }: ATSVarietyProps) {
                             <h3 className="text-lg font-bold text-gray-900">{title.title}</h3>
                             <p className="text-sm text-gray-700">{title.details}</p>
                           </div>
+                        </div>
+                      );
+                    }
+                    // Special handling for skills with categories (containing ":")
+                    if (isSkillsType && line.includes(':')) {
+                      const [category, skills] = line.split(':');
+                      return (
+                        <div key={idx} className="mb-3">
+                          <p className="font-semibold text-gray-900">{category.trim()}</p>
+                          <p className="text-gray-800 leading-relaxed ml-2">{skills.trim()}</p>
                         </div>
                       );
                     }

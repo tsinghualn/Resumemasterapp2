@@ -3,7 +3,6 @@ import { LandingPage } from './components/LandingPage';
 import { AuthDialog } from './components/AuthDialog';
 import { EmailVerificationInfo } from './components/EmailVerificationInfo';
 import { ProgressSteps } from './components/ProgressSteps';
-import { ParsedResumeEditor } from './components/ParsedResumeEditor';
 import { ResumeUploader } from './components/ResumeUploader';
 import { JobDescriptionScreen } from './components/JobDescriptionScreen';
 import { AIRewritePanel } from './components/AIRewritePanel';
@@ -26,7 +25,7 @@ import {
   DialogTrigger,
 } from './components/ui/dialog';
 
-type Screen = 'landing' | 'upload' | 'parsed' | 'jobdesc' | 'optimize' | 'matchscore' | 'preview' | 'dashboard';
+type Screen = 'landing' | 'upload' | 'jobdesc' | 'optimize' | 'matchscore' | 'preview' | 'dashboard';
 type AuthMode = 'signin' | 'signup';
 
 interface ResumeData {
@@ -305,13 +304,13 @@ SKILLS
       }
       
       // Update state and navigate immediately for better UX
-      console.log('✅ State updated, navigating to parsed screen...');
+      console.log('✅ State updated, navigating to job description screen...');
       setResumeContent(content);
       setUploadedFileName(fileName);
       
-      // Navigate immediately - don't wait
-      setCurrentScreen('parsed');
-      console.log('🎯 Navigation complete - screen set to: parsed');
+      // Navigate directly to job description - skip parsed screen
+      setCurrentScreen('jobdesc');
+      console.log('🎯 Navigation complete - screen set to: jobdesc');
     } else {
       console.log('❌ No content provided, skipping navigation');
     }
@@ -338,10 +337,6 @@ SKILLS
   const handleJobDescNext = (jobDesc: string) => {
     setJobDescription(jobDesc);
     setCurrentScreen('optimize');
-  };
-
-  const handleBackToParsed = () => {
-    setCurrentScreen('parsed');
   };
 
   const handleBackToJobDesc = () => {
@@ -773,7 +768,7 @@ CERTIFICATIONS
     return (
       <>
         <JobDescriptionScreen
-          onBack={handleBackToParsed}
+          onBack={handleBackToUpload}
           onNext={handleJobDescNext}
           initialValue={jobDescription}
         />

@@ -270,8 +270,10 @@ SECTION PARSING RULES - FOLLOW EXACTLY:
    - If courses have their own section header like "RELEVANT COURSEWORK" or "COURSES" then extract to "courses" field
    
 5. **Section Naming**:
+   - Set "experienceTitle" to "Employment History" (always use this title for experience section)
    - If Education section contains coursework/courses then set "educationTitle" to "Education & Courses"
    - Otherwise then set "educationTitle" to "Education"
+   - Set "skillsTitle" to "Skills" (always use this title for skills section)
 
 EXTRACTION RULES - COPY TEXT EXACTLY, WORD-FOR-WORD:
 
@@ -444,10 +446,12 @@ Required JSON structure (include ALL fields, use empty string "" if section does
   "contact": "EXACT contact info from resume",
   "summary": "EXACT COPY of summary text word-for-word",
   "experience": "EXACT COPY of all experience content word-for-word",
+  "experienceTitle": "Employment History",
   "education": "EXACT COPY of all education content word-for-word",
   "educationTitle": "Education & Courses" or "Education",
   "courses": "EXACT COPY if separate section exists",
   "skills": "EXACT COPY of all skills word-for-word",
+  "skillsTitle": "Skills",
   "projects": "EXACT COPY if PROJECTS header exists",
   "certifications": "EXACT COPY if CERTIFICATIONS header exists",
   "publications": "EXACT COPY if PUBLICATIONS header exists",

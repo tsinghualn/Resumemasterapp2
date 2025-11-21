@@ -4,6 +4,9 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
+import { parseExperience } from '../utils/experienceParser';
+import { parseEducation } from '../utils/educationParser';
+import { RichTextEditor } from './RichTextEditor';
 import { 
   Select,
   SelectContent,
@@ -13,6 +16,7 @@ import {
 } from './ui/select';
 import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
+import { Alert, AlertDescription } from './ui/alert';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -32,7 +36,8 @@ import {
   Trash2,
   Sparkles,
   GripVertical,
-  X
+  X,
+  Info
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { apiClient } from '../utils/api';
@@ -43,6 +48,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+import { PhotoUploadDialog } from './PhotoUploadDialog';
 
 interface ResumeData {
   personalDetails: {
@@ -127,6 +133,7 @@ export function AIRewritePanel({
   const [showReorderDialog, setShowReorderDialog] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
+  const [showPhotoDialog, setShowPhotoDialog] = useState(false);
   
   const [resumeData, setResumeData] = useState<ResumeData>({
     personalDetails: {
@@ -154,13 +161,13 @@ export function AIRewritePanel({
   });
 
   const [sectionOrder, setSectionOrder] = useState<SectionOrder[]>([
-    { id: 'personalDetails', type: 'personalDetails', label: 'Personal details', visible: true },
-    { id: 'contact', type: 'contact', label: 'Contact information', visible: true },
-    { id: 'summary', type: 'summary', label: 'Professional summary', visible: true },
-    { id: 'experience', type: 'experience', label: 'Employment history', visible: true },
+    { id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true },
+    { id: 'contact', type: 'contact', label: 'Contact Information', visible: true },
+    { id: 'summary', type: 'summary', label: 'Professional Summary', visible: true },
+    { id: 'experience', type: 'experience', label: 'Employment History', visible: true },
     { id: 'education', type: 'education', label: 'Education', visible: true },
     { id: 'skills', type: 'skills', label: 'Skills', visible: true },
-    { id: 'links', type: 'links', label: 'Links', visible: false },
+    { id: 'links', type: 'links', label: 'Links', visible: true },
   ]);
 
   // Parse resume data on mount
@@ -180,10 +187,13 @@ export function AIRewritePanel({
   }, [industryTone, rewriteStyle]);
 
   const parseResumeData = (data: any) => {
+    // Convert cached parsed data to ResumeData format
+    const fullText = [data.name, data.contact, data.summary, data.experience, data.education, data.skills].join('\n');
+    
     const parsed: ResumeData = {
       personalDetails: {
-        firstName: data.firstName || '',
-        lastName: data.lastName || '',
+        firstName: data.firstName || extractFirstName(data.name || ''),
+        lastName: data.lastName || extractLastName(data.name || ''),
         jobTitle: data.jobTitle || '',
         nationality: data.nationality || '',
         driversLicense: data.driversLicense || '',
@@ -195,25 +205,27 @@ export function AIRewritePanel({
         phone: extractPhone(data.contact || ''),
         address: extractAddress(data.contact || ''),
         linkedin: extractLinkedIn(data.contact || ''),
-        website: extractWebsite(data.contact || '')
+        website: extractWebsite(fullText)
       },
       summary: data.summary || '',
       experience: parseExperience(data.experience || ''),
       education: parseEducation(data.education || ''),
       skills: parseSkills(data.skills || ''),
-      links: [],
-      customSections: []
+      links: parseLinks(fullText),
+      customSections: parseCustomSections(fullText)
     };
 
     setResumeData(parsed);
   };
 
   const parseResumeFromText = (text: string) => {
-    const lines = text.split('\n');
+    // Basic text parsing
+    const lines = text.split('\n').filter(line => line.trim());
     
     // Extract name from first line
-    const firstName = lines[0]?.split(' ')[0] || '';
-    const lastName = lines[0]?.split(' ').slice(1).join(' ') || '';
+    const nameLine = lines[0] || '';
+    const firstName = extractFirstName(nameLine);
+    const lastName = extractLastName(nameLine);
 
     const parsed: ResumeData = {
       personalDetails: {
@@ -232,18 +244,28 @@ export function AIRewritePanel({
         linkedin: extractLinkedIn(text),
         website: extractWebsite(text)
       },
-      summary: '',
+      summary: extractSummary(text),
       experience: parseExperience(text),
       education: parseEducation(text),
       skills: parseSkills(text),
-      links: [],
-      customSections: []
+      links: parseLinks(text),
+      customSections: parseCustomSections(text)
     };
 
     setResumeData(parsed);
   };
 
   // Helper functions for parsing
+  const extractFirstName = (text: string): string => {
+    const parts = text.trim().split(/\s+/);
+    return parts[0] || '';
+  };
+
+  const extractLastName = (text: string): string => {
+    const parts = text.trim().split(/\s+/);
+    return parts.slice(1).join(' ') || '';
+  };
+
   const extractEmail = (text: string): string => {
     const match = text.match(/[\w\.-]+@[\w\.-]+\.\w+/);
     return match ? match[0] : '';
@@ -255,38 +277,257 @@ export function AIRewritePanel({
   };
 
   const extractAddress = (text: string): string => {
+    // Look for common address patterns
+    // Pattern 1: City, State ZIP
+    const pattern1 = text.match(/[A-Z][a-z]+(?:\s[A-Z][a-z]+)*,\s*[A-Z]{2}(?:\s+\d{5})?/);
+    if (pattern1) return pattern1[0];
+    
+    // Pattern 2: Just City, State
+    const pattern2 = text.match(/[A-Z][a-z]+(?:\s[A-Z][a-z]+)*,\s*[A-Z]{2}/);
+    if (pattern2) return pattern2[0];
+    
+    // Pattern 3: Full street address
+    const pattern3 = text.match(/\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd)[,\s]+[A-Z][a-z]+,\s*[A-Z]{2}/);
+    if (pattern3) return pattern3[0];
+    
     return '';
   };
 
   const extractLinkedIn = (text: string): string => {
-    const match = text.match(/linkedin\.com\/in\/[\w-]+/);
-    return match ? match[0] : '';
+    const match = text.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/([\w-]+)/i);
+    return match ? `linkedin.com/in/${match[1]}` : '';
   };
 
   const extractWebsite = (text: string): string => {
-    const match = text.match(/(https?:\/\/)?(www\.)?[\w-]+\.\w+/);
-    return match && !match[0].includes('linkedin') && !match[0].includes('@') ? match[0] : '';
+    // Look for GitHub first
+    const githubMatch = text.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([\w-]+)/i);
+    if (githubMatch) return `github.com/${githubMatch[1]}`;
+    
+    // Email domains to exclude
+    const emailDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com', 'icloud.com', 'mail.com', 'protonmail.com'];
+    
+    // Look for other websites (exclude email domains and linkedin)
+    const websiteMatch = text.match(/(?:https?:\/\/)?(?:www\.)?([\w-]+\.(?:com|net|org|io|dev|me|co)(?:\/[\w-]*)?)/i);
+    if (websiteMatch) {
+      const matchIndex = text.indexOf(websiteMatch[0]);
+      const textBeforeMatch = text.substring(Math.max(0, matchIndex - 50), matchIndex);
+      const domain = websiteMatch[1].toLowerCase();
+      
+      // Skip if this is part of an email address (@ appears right before the domain)
+      if (textBeforeMatch.includes('@') && textBeforeMatch.lastIndexOf('@') > textBeforeMatch.length - 20) {
+        return '';
+      }
+      
+      // Skip if this is a common email domain
+      if (emailDomains.some(emailDomain => domain.includes(emailDomain))) {
+        return '';
+      }
+      
+      // Skip if this is linkedin
+      if (domain.includes('linkedin')) {
+        return '';
+      }
+      
+      return websiteMatch[1];
+    }
+    
+    return '';
   };
 
-  const parseExperience = (text: string): ResumeData['experience'] => {
-    // Basic parsing - you can enhance this with AI
-    return [];
+  const extractSummary = (text: string): string => {
+    // Look for summary section
+    const summaryMatch = text.match(/(?:PROFESSIONAL\s+SUMMARY|SUMMARY|PROFILE|OBJECTIVE)[\s\n]+([\s\S]*?)(?=\n\n[A-Z]{2,}[A-Z\s]{8,}|\n[A-Z][A-Z\s]{10,}|$)/i);
+    if (summaryMatch && summaryMatch[1]) {
+      return summaryMatch[1].trim();
+    }
+    return '';
   };
 
-  const parseEducation = (text: string): ResumeData['education'] => {
-    return [];
-  };
+  // Experience parsing moved to /utils/experienceParser.ts
+
+  // Education parsing moved to /utils/educationParser.ts
 
   const parseSkills = (text: string): string[] => {
-    const skillsMatch = text.match(/SKILLS[\s\S]*?(?=\n\n[A-Z]|\n\n$|$)/i);
-    if (skillsMatch) {
-      return skillsMatch[0]
-        .replace(/SKILLS/i, '')
-        .split(/[,\n•|]/)
-        .map(s => s.trim())
-        .filter(s => s && s.length > 1);
+    if (!text || text.trim() === '') return [];
+    
+    // Split by newlines and bullets ONLY (not commas)
+    // This preserves comma-separated skills within each bullet point
+    const lines = text.split('\n');
+    const skills: string[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      
+      // Skip category headers (e.g., "Programming Languages:", "Tools:")
+      if (trimmed.match(/^[A-Za-z\s&/]+:\s*$/)) continue;
+      
+      // Split by bullet points (•) only
+      if (trimmed.includes('•')) {
+        const bulletItems = trimmed.split('•');
+        for (const item of bulletItems) {
+          const cleaned = item
+            .trim()
+            .replace(/^[-–—]\s*/, '') // Remove leading dashes
+            .replace(/^[A-Za-z\s&/]+:\s*/, ''); // Remove category prefixes
+          
+          if (cleaned && cleaned.length > 1 && !cleaned.match(/^[A-Z\s]{10,}$/)) {
+            skills.push(cleaned);
+          }
+        }
+      } else {
+        // Single line without bullets - treat as one skill group
+        const cleaned = trimmed
+          .replace(/^[-–—]\s*/, '') // Remove leading dashes
+          .replace(/^[A-Za-z\s&/]+:\s*/, ''); // Remove category prefixes
+        
+        if (cleaned && cleaned.length > 1 && !cleaned.match(/^[A-Z\s]{10,}$/)) {
+          skills.push(cleaned);
+        }
+      }
     }
-    return [];
+    
+    // Remove duplicates (case-insensitive)
+    const uniqueSkills: string[] = [];
+    const seenSkills = new Set<string>();
+    
+    for (const skill of skills) {
+      const lowerSkill = skill.toLowerCase();
+      if (!seenSkills.has(lowerSkill)) {
+        seenSkills.add(lowerSkill);
+        uniqueSkills.push(skill);
+      }
+    }
+    
+    return uniqueSkills;
+  };
+
+  const parseLinks = (text: string): ResumeData['links'] => {
+    const links: ResumeData['links'] = [];
+    
+    // Email domains to exclude
+    const emailDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com', 'icloud.com', 'mail.com', 'protonmail.com'];
+    
+    // Check for GitHub
+    const githubMatch = text.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([\w-]+)/i);
+    if (githubMatch) {
+      links.push({
+        id: `link-github-${Date.now()}`,
+        label: 'GitHub',
+        url: `github.com/${githubMatch[1]}`
+      });
+    }
+    
+    // Check for Portfolio/Website (exclude LinkedIn, GitHub, and email)
+    const websiteMatches = text.match(/(?:https?:\/\/)?(?:www\.)?([\w-]+\.(?:com|net|org|io|dev|me|co)(?:\/[\w-]*)?)/gi);
+    if (websiteMatches) {
+      websiteMatches.forEach((match, index) => {
+        const cleanUrl = match.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+        const matchIndex = text.indexOf(match);
+        const textBeforeMatch = text.substring(Math.max(0, matchIndex - 20), matchIndex);
+        
+        // Skip if part of email address
+        const isEmail = textBeforeMatch.includes('@') || cleanUrl.includes('@');
+        
+        // Skip if common email domain
+        const isEmailDomain = emailDomains.some(domain => cleanUrl.includes(domain));
+        
+        if (!cleanUrl.includes('linkedin') && 
+            !isEmail &&
+            !isEmailDomain &&
+            !cleanUrl.includes('github') &&
+            !links.find(l => l.url === cleanUrl)) {
+          links.push({
+            id: `link-website-${Date.now()}-${index}`,
+            label: 'Website',
+            url: cleanUrl
+          });
+        }
+      });
+    }
+    
+    return links;
+  };
+
+  const parseCustomSections = (text: string): ResumeData['customSections'] => {
+    const customSections: ResumeData['customSections'] = [];
+    
+    // Common custom section headers
+    const sectionHeaders = [
+      'AWARDS', 'HONORS', 'ACHIEVEMENTS',
+      'PATENTS', 'PUBLICATIONS', 'RESEARCH',
+      'PROJECTS', 'PORTFOLIO', 'PERSONAL PROJECTS',
+      'CERTIFICATIONS', 'CERTIFICATES', 'LICENSES',
+      'VOLUNTEER', 'VOLUNTEERING', 'COMMUNITY',
+      'LANGUAGES', 'LANGUAGE SKILLS',
+      'INTERESTS', 'HOBBIES',
+      'REFERENCES', 'PROFESSIONAL AFFILIATIONS'
+    ];
+    
+    // Try to find sections in the text
+    // Pattern: Section header followed by content until next section or end
+    const lines = text.split('\n');
+    let currentSection: { title: string; content: string[] } | null = null;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      const upperLine = line.toUpperCase();
+      
+      // Check if this line is a section header
+      const matchedHeader = sectionHeaders.find(header => {
+        // Check for exact match or match with common variations
+        return upperLine === header || 
+               upperLine === `${header}:` ||
+               upperLine.startsWith(`${header} `);
+      });
+      
+      if (matchedHeader) {
+        // Save previous section if exists
+        if (currentSection && currentSection.content.length > 0) {
+          customSections.push({
+            id: `custom-${Date.now()}-${customSections.length}`,
+            title: currentSection.title,
+            content: currentSection.content.join('\n').trim()
+          });
+        }
+        
+        // Start new section
+        currentSection = {
+          title: line.replace(':', '').trim(),
+          content: []
+        };
+      } else if (currentSection) {
+        // Add line to current section
+        // Stop if we hit another major section (EXPERIENCE, EDUCATION, SKILLS, SUMMARY)
+        const majorSections = ['EXPERIENCE', 'WORK HISTORY', 'EMPLOYMENT', 'EDUCATION', 'SKILLS', 'SUMMARY', 'PROFILE', 'CONTACT'];
+        const isMajorSection = majorSections.some(major => upperLine.includes(major));
+        
+        if (isMajorSection) {
+          // Save current section and stop
+          if (currentSection.content.length > 0) {
+            customSections.push({
+              id: `custom-${Date.now()}-${customSections.length}`,
+              title: currentSection.title,
+              content: currentSection.content.join('\n').trim()
+            });
+          }
+          currentSection = null;
+        } else if (line) {
+          currentSection.content.push(line);
+        }
+      }
+    }
+    
+    // Save last section
+    if (currentSection && currentSection.content.length > 0) {
+      customSections.push({
+        id: `custom-${Date.now()}-${customSections.length}`,
+        title: currentSection.title,
+        content: currentSection.content.join('\n').trim()
+      });
+    }
+    
+    return customSections;
   };
 
   // AI Optimization
@@ -489,7 +730,36 @@ export function AIRewritePanel({
       visible: true
     }]);
     
-    setCurrentSection('customSections');
+    setCurrentSection(newSection.id);
+  };
+
+  const updateCustomSection = (id: string, field: 'title' | 'content', value: string) => {
+    setResumeData(prev => ({
+      ...prev,
+      customSections: prev.customSections.map(section =>
+        section.id === id ? { ...section, [field]: value } : section
+      )
+    }));
+    
+    // Update section order label if title changed
+    if (field === 'title') {
+      setSectionOrder(prev => prev.map(section =>
+        section.id === id ? { ...section, label: value } : section
+      ));
+    }
+  };
+
+  const deleteCustomSection = (id: string) => {
+    setResumeData(prev => ({
+      ...prev,
+      customSections: prev.customSections.filter(section => section.id !== id)
+    }));
+    
+    // Remove from section order
+    setSectionOrder(prev => prev.filter(section => section.id !== id));
+    
+    // Navigate to previous section
+    setCurrentSection('links');
   };
 
   // Drag and drop handlers
@@ -527,7 +797,33 @@ export function AIRewritePanel({
     return sectionOrder.filter(section => section.visible);
   };
 
-  const handleNext = async () => {
+  // Navigate to next section
+  const handleNextSection = () => {
+    // Prevent navigation if Industry Tone or Rewrite Style is not set
+    if (!industryTone || !rewriteStyle) {
+      alert('Please select both Industry Tone and Rewrite Style before continuing.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    
+    const visibleSections = getNavigationItems();
+    const currentIndex = visibleSections.findIndex(s => s.type === currentSection);
+    if (currentIndex < visibleSections.length - 1) {
+      setCurrentSection(visibleSections[currentIndex + 1].type);
+    }
+  };
+
+  // Navigate to previous section
+  const handlePreviousSection = () => {
+    const visibleSections = getNavigationItems();
+    const currentIndex = visibleSections.findIndex(s => s.type === currentSection);
+    if (currentIndex > 0) {
+      setCurrentSection(visibleSections[currentIndex - 1].type);
+    }
+  };
+
+  // Finalize and go to next screen
+  const handleFinish = async () => {
     if (!industryTone || !rewriteStyle) {
       toast.error('Please select Industry Tone and Rewrite Style');
       setShowSettings(true);
@@ -536,6 +832,17 @@ export function AIRewritePanel({
 
     const finalResume = generateResumeText(resumeData);
     onNext(finalResume);
+  };
+
+  // Check if we're on the first/last section
+  const isFirstSection = () => {
+    const visibleSections = getNavigationItems();
+    return visibleSections[0]?.type === currentSection;
+  };
+
+  const isLastSection = () => {
+    const visibleSections = getNavigationItems();
+    return visibleSections[visibleSections.length - 1]?.type === currentSection;
   };
 
   const generateResumeText = (data: ResumeData): string => {
@@ -550,6 +857,14 @@ export function AIRewritePanel({
           text += `${data.personalDetails.firstName} ${data.personalDetails.lastName}\n`;
           if (data.personalDetails.jobTitle) {
             text += `${data.personalDetails.jobTitle}\n`;
+          }
+          // Add additional personal details if present
+          const additionalDetails = [];
+          if (data.personalDetails.nationality) additionalDetails.push(`Nationality: ${data.personalDetails.nationality}`);
+          if (data.personalDetails.driversLicense) additionalDetails.push(`Driver's License: ${data.personalDetails.driversLicense}`);
+          if (data.personalDetails.birthDate) additionalDetails.push(`Date of Birth: ${data.personalDetails.birthDate}`);
+          if (additionalDetails.length > 0) {
+            text += additionalDetails.join(' | ') + '\n';
           }
           text += '\n';
           break;
@@ -622,6 +937,17 @@ export function AIRewritePanel({
             text += '\n';
           }
           break;
+
+        case 'customSections':
+          // Find custom section by id
+          const customSection = data.customSections.find(cs => cs.id === section.id);
+          if (customSection && customSection.content) {
+            text += customSection.title.toUpperCase() + '\n';
+            // Strip HTML tags for plain text export
+            const plainContent = customSection.content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+            text += plainContent + '\n\n';
+          }
+          break;
       }
     });
 
@@ -638,6 +964,16 @@ export function AIRewritePanel({
               <Sparkles className="w-5 h-5 text-blue-600" />
               <h2>AI Resume Optimization Settings</h2>
             </div>
+            
+            <Alert className="mb-6 bg-blue-50 border-blue-200">
+              <Info className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="text-blue-800">
+                <strong>Important:</strong> These settings control how AI optimizes your resume content. 
+                Industry Tone adjusts the language style, while Rewrite Style determines the level of detail. 
+                Choose settings that match your target job and industry for best results.
+              </AlertDescription>
+            </Alert>
+
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <Label htmlFor="industry-tone">Industry Tone</Label>
@@ -668,6 +1004,7 @@ export function AIRewritePanel({
                 </Select>
               </div>
             </div>
+            
             {isOptimizing && (
               <div className="mt-4 flex items-center gap-2 text-blue-600">
                 <Sparkles className="w-4 h-4 animate-pulse" />
@@ -699,7 +1036,14 @@ export function AIRewritePanel({
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setCurrentSection(item.type)}
+                    onClick={() => {
+                      if (!industryTone || !rewriteStyle) {
+                        alert('Please select both Industry Tone and Rewrite Style before continuing.');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        return;
+                      }
+                      setCurrentSection(item.type);
+                    }}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                       currentSection === item.type
                         ? 'bg-blue-50 text-blue-600'
@@ -770,10 +1114,34 @@ export function AIRewritePanel({
                   </div>
 
                   <div>
-                    <Button variant="outline" className="w-full">
-                      <Camera className="w-4 h-4 mr-2" />
-                      Add photo
-                    </Button>
+                    {resumeData.personalDetails.photoUrl ? (
+                      <div className="space-y-2">
+                        <div className="relative w-32 h-32 mx-auto">
+                          <img
+                            src={resumeData.personalDetails.photoUrl}
+                            alt="Profile"
+                            className="w-full h-full object-cover rounded-full border-4 border-gray-200"
+                          />
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          className="w-full"
+                          onClick={() => setShowPhotoDialog(true)}
+                        >
+                          <Camera className="w-4 h-4 mr-2" />
+                          Change photo
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button 
+                        variant="outline" 
+                        className="w-full"
+                        onClick={() => setShowPhotoDialog(true)}
+                      >
+                        <Camera className="w-4 h-4 mr-2" />
+                        Add photo
+                      </Button>
+                    )}
                   </div>
 
                   <Separator />
@@ -902,12 +1270,11 @@ export function AIRewritePanel({
 
                   <div>
                     <Label htmlFor="summary">Summary</Label>
-                    <Textarea
-                      id="summary"
+                    <RichTextEditor
                       value={resumeData.summary}
-                      onChange={(e) => updateSummary(e.target.value)}
+                      onChange={(value) => updateSummary(value)}
                       placeholder="Write a compelling professional summary..."
-                      rows={6}
+                      minHeight="150px"
                     />
                     {industryTone && rewriteStyle && (
                       <p className="text-xs text-gray-500 mt-2">
@@ -988,26 +1355,28 @@ export function AIRewritePanel({
                                 placeholder="Dec 2023"
                                 disabled={exp.current}
                               />
-                              <label className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={exp.current}
-                                  onChange={(e) => updateExperience(exp.id, 'current', e.target.checked)}
-                                  className="rounded"
-                                />
-                                Currently working here
-                              </label>
+                              {index === 0 && (
+                                <label className="flex items-center gap-2 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    checked={exp.current}
+                                    onChange={(e) => updateExperience(exp.id, 'current', e.target.checked)}
+                                    className="rounded"
+                                  />
+                                  Currently working here
+                                </label>
+                              )}
                             </div>
                           </div>
                         </div>
 
                         <div>
                           <Label>Description</Label>
-                          <Textarea
+                          <RichTextEditor
                             value={exp.description}
-                            onChange={(e) => updateExperience(exp.id, 'description', e.target.value)}
+                            onChange={(value) => updateExperience(exp.id, 'description', value)}
                             placeholder="Describe your responsibilities and achievements..."
-                            rows={4}
+                            minHeight="120px"
                           />
                         </div>
                       </div>
@@ -1106,11 +1475,11 @@ export function AIRewritePanel({
 
                         <div>
                           <Label>Details (GPA, honors, coursework)</Label>
-                          <Textarea
+                          <RichTextEditor
                             value={edu.details}
-                            onChange={(e) => updateEducation(edu.id, 'details', e.target.value)}
+                            onChange={(value) => updateEducation(edu.id, 'details', value)}
                             placeholder="GPA: 3.8/4.0, Dean's List..."
-                            rows={3}
+                            minHeight="100px"
                           />
                         </div>
                       </div>
@@ -1130,17 +1499,17 @@ export function AIRewritePanel({
                   <div>
                     <h2>Skills</h2>
                     <p className="text-gray-600 mt-2">
-                      List your relevant skills and competencies (comma-separated).
+                      List your relevant skills and competencies (one per line).
                     </p>
                   </div>
                   <Textarea
-                    value={resumeData.skills.join(', ')}
+                    value={resumeData.skills.join('\n')}
                     onChange={(e) => setResumeData(prev => ({
                       ...prev,
-                      skills: e.target.value.split(',').map(s => s.trim()).filter(s => s)
+                      skills: e.target.value.split('\n').map(s => s.trim()).filter(s => s)
                     }))}
-                    placeholder="JavaScript, React, Node.js, Python, SQL..."
-                    rows={6}
+                    placeholder="JavaScript\nReact\nNode.js\nPython\nSQL"
+                    rows={10}
                   />
                 </div>
               )}
@@ -1187,24 +1556,77 @@ export function AIRewritePanel({
                   </Button>
                 </div>
               )}
+
+              {/* Custom Sections */}
+              {resumeData.customSections.map((section) => (
+                currentSection === section.id && (
+                  <div key={section.id} className="space-y-6">
+                    <div>
+                      <h2>Custom Section</h2>
+                      <p className="text-gray-600 mt-2">
+                        Add additional sections like Awards, Publications, Projects, etc.
+                      </p>
+                    </div>
+
+                    <div>
+                      <Label>Section Title</Label>
+                      <Input
+                        value={section.title}
+                        onChange={(e) => updateCustomSection(section.id, 'title', e.target.value)}
+                        placeholder="e.g., Awards, Publications, Projects"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Content</Label>
+                      <RichTextEditor
+                        value={section.content}
+                        onChange={(value) => updateCustomSection(section.id, 'content', value)}
+                        placeholder="Add your content here..."
+                        minHeight="150px"
+                      />
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      className="w-full text-red-500 hover:text-red-600"
+                      onClick={() => deleteCustomSection(section.id)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete this section
+                    </Button>
+                  </div>
+                )
+              ))}
             </Card>
 
             {/* Bottom Navigation */}
             <div className="flex items-center justify-between mt-6">
-              <Button variant="outline" onClick={onBack}>
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
-              </Button>
+              {!isFirstSection() ? (
+                <Button variant="outline" onClick={handlePreviousSection}>
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back
+                </Button>
+              ) : (
+                <div></div>
+              )}
 
               <Button variant="outline" onClick={() => setShowReorderDialog(true)}>
                 <Menu className="w-4 h-4 mr-2" />
                 Reorder sections
               </Button>
 
-              <Button onClick={handleNext}>
-                Next
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
+              {!isLastSection() ? (
+                <Button onClick={handleNextSection}>
+                  Next
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              ) : (
+                <Button onClick={handleFinish}>
+                  Finish
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -1230,11 +1652,31 @@ export function AIRewritePanel({
                     case 'personalDetails':
                       return (
                         <div key={section.id} className="text-center border-b pb-6">
+                          {resumeData.personalDetails.photoUrl && (
+                            <div className="flex justify-center mb-4">
+                              <img
+                                src={resumeData.personalDetails.photoUrl}
+                                alt="Profile"
+                                className="w-24 h-24 object-cover rounded-full border-2 border-gray-300"
+                              />
+                            </div>
+                          )}
                           <h1 className="text-3xl">
                             {resumeData.personalDetails.firstName} {resumeData.personalDetails.lastName}
                           </h1>
                           {resumeData.personalDetails.jobTitle && (
                             <p className="text-gray-600 mt-2">{resumeData.personalDetails.jobTitle}</p>
+                          )}
+                          {(resumeData.personalDetails.nationality || 
+                            resumeData.personalDetails.driversLicense || 
+                            resumeData.personalDetails.birthDate) && (
+                            <div className="text-xs text-gray-500 mt-2">
+                              {[
+                                resumeData.personalDetails.nationality && `Nationality: ${resumeData.personalDetails.nationality}`,
+                                resumeData.personalDetails.driversLicense && `Driver's License: ${resumeData.personalDetails.driversLicense}`,
+                                resumeData.personalDetails.birthDate && `Date of Birth: ${resumeData.personalDetails.birthDate}`
+                              ].filter(Boolean).join(' | ')}
+                            </div>
                           )}
                         </div>
                       );
@@ -1258,9 +1700,10 @@ export function AIRewritePanel({
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-2 uppercase">Professional Summary</h3>
-                          <p className="text-sm text-gray-700 leading-relaxed">
-                            {resumeData.summary}
-                          </p>
+                          <div 
+                            className="text-sm text-gray-700 leading-relaxed"
+                            dangerouslySetInnerHTML={{ __html: resumeData.summary }}
+                          />
                         </div>
                       );
 
@@ -1278,7 +1721,10 @@ export function AIRewritePanel({
                               <div className="text-xs text-gray-500 mb-2">
                                 {exp.startDate} - {exp.current ? 'Present' : exp.endDate}
                               </div>
-                              <p className="text-sm text-gray-700 whitespace-pre-line">{exp.description}</p>
+                              <div 
+                                className="text-sm text-gray-700"
+                                dangerouslySetInnerHTML={{ __html: exp.description }}
+                              />
                             </div>
                           ))}
                         </div>
@@ -1299,7 +1745,10 @@ export function AIRewritePanel({
                                 {edu.startDate} - {edu.current ? 'Present' : edu.endDate}
                               </div>
                               {edu.details && (
-                                <p className="text-sm text-gray-700 mt-1">{edu.details}</p>
+                                <div 
+                                  className="text-sm text-gray-700 mt-1"
+                                  dangerouslySetInnerHTML={{ __html: edu.details }}
+                                />
                               )}
                             </div>
                           ))}
@@ -1327,6 +1776,20 @@ export function AIRewritePanel({
                               {link.label}: {link.url}
                             </div>
                           ))}
+                        </div>
+                      );
+
+                    case 'customSections':
+                      // Find the custom section that matches this section.id
+                      const customSection = resumeData.customSections.find(cs => cs.id === section.id);
+                      if (!customSection || !customSection.content) return null;
+                      return (
+                        <div key={section.id}>
+                          <h3 className="text-sm font-semibold mb-2 uppercase">{customSection.title}</h3>
+                          <div 
+                            className="text-sm text-gray-700"
+                            dangerouslySetInnerHTML={{ __html: customSection.content }}
+                          />
                         </div>
                       );
 
@@ -1381,6 +1844,16 @@ export function AIRewritePanel({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Photo Upload Dialog */}
+      <PhotoUploadDialog
+        open={showPhotoDialog}
+        onClose={() => setShowPhotoDialog(false)}
+        onPhotoSelected={(photoUrl) => {
+          updatePersonalDetails('photoUrl', photoUrl);
+          setShowPhotoDialog(false);
+        }}
+      />
     </div>
   );
 }
