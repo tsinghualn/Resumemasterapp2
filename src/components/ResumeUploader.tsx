@@ -649,8 +649,6 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
 
   return (
     <Card className="p-6">
-      <h2 className="text-xl mb-4">Upload Resume</h2>
-      
       {!fileName && !isProcessing && !isComplete ? (
         <div
           onDragOver={handleDragOver}

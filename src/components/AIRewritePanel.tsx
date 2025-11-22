@@ -52,6 +52,7 @@ import {
   DialogTitle,
 } from './ui/dialog';
 import { PhotoUploadDialog } from './PhotoUploadDialog';
+import { AddSectionDialog } from './AddSectionDialog';
 
 interface ResumeData {
   personalDetails: {
@@ -119,6 +120,8 @@ interface AIRewritePanelProps {
   jobDescription: string;
   onBack: () => void;
   onNext: (optimizedResume: string) => void;
+  onPreview: () => void;
+  optimizationFlow: 'direct' | 'withJob';
   cachedParsedData?: any;
 }
 
@@ -127,6 +130,8 @@ export function AIRewritePanel({
   jobDescription, 
   onBack, 
   onNext,
+  onPreview,
+  optimizationFlow,
   cachedParsedData
 }: AIRewritePanelProps) {
   const [currentSection, setCurrentSection] = useState<SectionType>('personalDetails');
@@ -144,6 +149,7 @@ export function AIRewritePanel({
   const rewriteStyleRef = useRef<HTMLButtonElement>(null);
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
   const [showPhotoDialog, setShowPhotoDialog] = useState(false);
+  const [showAddSectionDialog, setShowAddSectionDialog] = useState(false);
   
   // AI Improve dialog state
   const [improveDialogOpen, setImproveDialogOpen] = useState(false);
@@ -739,9 +745,13 @@ export function AIRewritePanel({
 
   // Custom section handlers
   const addCustomSection = () => {
+    setShowAddSectionDialog(true);
+  };
+
+  const handleAddSection = (sectionId: string, title: string) => {
     const newSection = {
-      id: `custom-${Date.now()}`,
-      title: 'Custom Section',
+      id: sectionId,
+      title: title,
       content: ''
     };
     setResumeData(prev => ({
@@ -758,6 +768,7 @@ export function AIRewritePanel({
     }]);
     
     setCurrentSection(newSection.id);
+    toast.success(`${title} section added!`);
   };
 
   const updateCustomSection = (id: string, field: 'title' | 'content', value: string) => {
@@ -1036,19 +1047,39 @@ export function AIRewritePanel({
           }`}
         >
           <div className="max-w-7xl mx-auto">
-            <div className="flex items-center gap-3 mb-4">
-              <Sparkles className="w-5 h-5 text-blue-600" />
-              <h2>AI Resume Optimization Settings</h2>
+            {/* Header */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <Button onClick={onBack} variant="ghost" size="sm">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back
+                </Button>
+                
+                <div className="flex items-center gap-2">
+                  <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-2 rounded-lg">
+                    <Sparkles className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-xl">AI Resume Optimization</h2>
+                </div>
+                
+                <Button 
+                  onClick={() => {
+                    if (optimizationFlow === 'direct') {
+                      onPreview();
+                    } else {
+                      // For 'withJob' flow, go to job description page
+                      onBack();
+                    }
+                  }} 
+                  variant="ghost" 
+                  size="sm"
+                >
+                  Next
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
+              <p className="text-sm text-gray-600 text-center">Review and accept AI-generated improvements</p>
             </div>
-            
-            <Alert className="mb-6 bg-blue-50 border-blue-200">
-              <Info className="h-4 w-4 text-blue-600" />
-              <AlertDescription className="text-blue-800">
-                <strong>Important:</strong> These settings control how AI optimizes your resume content. 
-                Industry Tone adjusts the language style, while Rewrite Style determines the level of detail. 
-                Choose settings that match your target job and industry for best results.
-              </AlertDescription>
-            </Alert>
 
             <div className="grid grid-cols-2 gap-6">
               <div>
@@ -1073,7 +1104,7 @@ export function AIRewritePanel({
                 {!industryTone && (
                   <div className="flex items-start gap-2 mt-2 text-sm text-amber-700">
                     <span className="text-amber-500">⚠</span>
-                    <span>Please select an industry tone to begin optimization</span>
+                    <span>Please select an industry tone to adjust the language style</span>
                   </div>
                 )}
               </div>
@@ -1099,7 +1130,7 @@ export function AIRewritePanel({
                 {!rewriteStyle && (
                   <div className="flex items-start gap-2 mt-2 text-sm text-amber-700">
                     <span className="text-amber-500">⚠</span>
-                    <span>Please select a rewrite style to begin optimization</span>
+                    <span>Please select a rewrite style to determine the level of detail</span>
                   </div>
                 )}
               </div>
@@ -2173,6 +2204,13 @@ export function AIRewritePanel({
           updatePersonalDetails('photoUrl', photoUrl);
           setShowPhotoDialog(false);
         }}
+      />
+
+      {/* Add Section Dialog */}
+      <AddSectionDialog
+        open={showAddSectionDialog}
+        onClose={() => setShowAddSectionDialog(false)}
+        onAddSection={handleAddSection}
       />
 
       {/* AI Improve Dialog */}

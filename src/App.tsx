@@ -74,6 +74,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
   const [startMode, setStartMode] = useState<'upload' | 'scratch'>('upload');
   const [isEditMode, setIsEditMode] = useState(false); // Track if user is editing existing resume
+  const [optimizationFlow, setOptimizationFlow] = useState<'direct' | 'withJob'>('direct'); // Track if user came directly or via job description
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [showEmailVerification, setShowEmailVerification] = useState(false);
@@ -340,6 +341,7 @@ SKILLS
   const handleJobDescNext = (jobDesc: string) => {
     setJobDescription(jobDesc);
     setCurrentScreen('optimize');
+    setOptimizationFlow('withJob');
   };
 
   const handleBackToJobDesc = () => {
@@ -762,6 +764,7 @@ CERTIFICATIONS
                 }}
                 onNavigateToOptimize={() => {
                   setCurrentScreen('optimize');
+                  setOptimizationFlow('direct');
                   setParseResumeDialogOpen(false);
                 }}
                 onNavigateToJobDesc={() => {
@@ -837,6 +840,8 @@ CERTIFICATIONS
           jobDescription={jobDescription}
           onBack={handleBackToJobDesc}
           onNext={handleOptimizeNext}
+          onPreview={() => setCurrentScreen('preview')}
+          optimizationFlow={optimizationFlow}
           cachedParsedData={cachedResumeData}
         />
         <AuthDialog
