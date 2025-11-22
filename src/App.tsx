@@ -345,7 +345,7 @@ SKILLS
   };
 
   const handleBackToJobDesc = () => {
-    setCurrentScreen('jobdesc');
+    setCurrentScreen('landing'); // Navigate to homepage instead
   };
 
   const handleOptimizeNext = (optimizedResume: string) => {
