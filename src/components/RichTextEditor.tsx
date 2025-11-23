@@ -58,6 +58,36 @@ export function RichTextEditor({
     isUpdatingRef.current = true;
     
     try {
+      // For indent/outdent commands, ensure we're working within a list context
+      if (command === 'indent' || command === 'outdent') {
+        const range = selection.getRangeAt(0);
+        const container = range.commonAncestorContainer;
+        const parentElement = container.nodeType === Node.TEXT_NODE 
+          ? container.parentElement 
+          : container as HTMLElement;
+        
+        // Check if we're inside a list item
+        const listItem = parentElement?.closest('li');
+        
+        if (command === 'outdent' && listItem) {
+          // For outdent, check if this would remove the list item from the list
+          const parentList = listItem.parentElement;
+          if (parentList && (parentList.tagName === 'UL' || parentList.tagName === 'OL')) {
+            const grandParent = parentList.parentElement;
+            // If the parent list is NOT inside another list item, prevent outdent
+            // to avoid losing content
+            if (!grandParent?.closest('li')) {
+              console.log('Cannot outdent: would remove from list entirely');
+              isUpdatingRef.current = false;
+              return;
+            }
+          }
+        } else if (command === 'indent' && !listItem) {
+          // If not in a list, create one first
+          document.execCommand('insertUnorderedList', false);
+        }
+      }
+      
       // Execute command
       const success = document.execCommand(command, false, commandValue);
       
@@ -65,13 +95,14 @@ export function RichTextEditor({
         console.warn(`Command ${command} failed`);
       }
       
-      // Trigger onChange with new content
+      // Trigger onChange with new content - add small delay to ensure DOM updates
       setTimeout(() => {
         if (editorRef.current) {
+          console.log('Editor content after command:', editorRef.current.innerHTML);
           onChange(editorRef.current.innerHTML);
         }
         isUpdatingRef.current = false;
-      }, 0);
+      }, 10); // Increased from 0 to 10ms
     } catch (error) {
       console.error('Error executing command:', error);
       isUpdatingRef.current = false;
@@ -219,21 +250,42 @@ export function RichTextEditor({
           margin-top: 4px;
           margin-bottom: 4px;
           padding-left: 20px;
+          display: block;
         }
         [contenteditable] li {
           margin-bottom: 2px;
+          display: list-item;
         }
         /* Main level bullets - filled circles */
         [contenteditable] > ul > li {
-          list-style-type: disc;
+          list-style-type: disc !important;
         }
         /* Second level bullets - hollow circles */
         [contenteditable] ul ul > li {
-          list-style-type: circle;
+          list-style-type: circle !important;
         }
         /* Third level bullets - squares */
         [contenteditable] ul ul ul > li {
-          list-style-type: square;
+          list-style-type: square !important;
+        }
+        /* Main level ordered list - numbers */
+        [contenteditable] > ol > li {
+          list-style-type: decimal !important;
+        }
+        /* Second level ordered list - lowercase letters */
+        [contenteditable] ol ol > li {
+          list-style-type: lower-alpha !important;
+        }
+        /* Third level ordered list - lowercase roman numerals */
+        [contenteditable] ol ol ol > li {
+          list-style-type: lower-roman !important;
+        }
+        /* Ensure numbers/bullets are visible */
+        [contenteditable] ol {
+          list-style-position: outside;
+        }
+        [contenteditable] ul {
+          list-style-position: outside;
         }
         /* Nested lists spacing */
         [contenteditable] li > ul,

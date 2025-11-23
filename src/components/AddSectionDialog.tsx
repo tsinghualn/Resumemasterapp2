@@ -19,8 +19,7 @@ import {
   BookOpen,
   Lightbulb,
   Briefcase,
-  Plus,
-  X
+  Plus
 } from 'lucide-react';
 
 interface PredefinedSection {
@@ -181,17 +180,7 @@ export function AddSectionDialog({ open, onClose, onAddSection }: AddSectionDial
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-2xl">Add New Resume Section</DialogTitle>
-            <Button 
-              variant="ghost" 
-              size="icon"
-              onClick={handleClose}
-              className="h-6 w-6"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+          <DialogTitle className="text-2xl">Add New Resume Section</DialogTitle>
           <DialogDescription className="text-gray-600">
             Choose from our predefined sections or create your own custom section
           </DialogDescription>
@@ -199,7 +188,7 @@ export function AddSectionDialog({ open, onClose, onAddSection }: AddSectionDial
 
         <div className="mt-6">
           {/* Predefined Sections Grid */}
-          <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="grid grid-cols-2 gap-3 mb-6">
             {predefinedSections.map((section) => {
               const Icon = section.icon;
               return (
@@ -207,19 +196,19 @@ export function AddSectionDialog({ open, onClose, onAddSection }: AddSectionDial
                   key={section.id}
                   onClick={() => handlePredefinedSelect(section)}
                   className={`
-                    flex items-start gap-4 p-4 rounded-xl border-2 transition-all
+                    flex items-start gap-2 p-2.5 rounded-lg border-2 transition-all
                     hover:shadow-md hover:scale-[1.02]
                     ${section.color.border} ${section.color.bg}
                   `}
                 >
-                  <div className={`p-2 rounded-lg ${section.color.iconBg}`}>
-                    <Icon className={`w-6 h-6 ${section.color.text}`} />
+                  <div className={`p-1.5 rounded-md ${section.color.iconBg} flex-shrink-0`}>
+                    <Icon className={`w-4 h-4 ${section.color.text}`} />
                   </div>
-                  <div className="text-left flex-1">
-                    <h3 className={`font-semibold mb-1 ${section.color.text}`}>
+                  <div className="text-left flex-1 min-w-0">
+                    <h3 className={`text-sm font-semibold mb-0.5 ${section.color.text}`}>
                       {section.title}
                     </h3>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-xs text-gray-600 line-clamp-2">
                       {section.description}
                     </p>
                   </div>

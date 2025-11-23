@@ -40,7 +40,8 @@ import {
   Sparkles,
   GripVertical,
   X,
-  Info
+  Info,
+  Pencil
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { apiClient } from '../utils/api';
@@ -150,6 +151,8 @@ export function AIRewritePanel({
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
   const [showPhotoDialog, setShowPhotoDialog] = useState(false);
   const [showAddSectionDialog, setShowAddSectionDialog] = useState(false);
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [editingSectionName, setEditingSectionName] = useState<string>('');
   
   // AI Improve dialog state
   const [improveDialogOpen, setImproveDialogOpen] = useState(false);
@@ -800,6 +803,51 @@ export function AIRewritePanel({
     setCurrentSection('links');
   };
 
+  // Section name editing handlers
+  const startEditingSection = (sectionId: string, currentLabel: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSectionId(sectionId);
+    setEditingSectionName(currentLabel);
+  };
+
+  const saveEditingSection = () => {
+    if (!editingSectionId || !editingSectionName.trim()) {
+      setEditingSectionId(null);
+      return;
+    }
+
+    // Update section order label
+    setSectionOrder(prev => prev.map(section =>
+      section.id === editingSectionId ? { ...section, label: editingSectionName } : section
+    ));
+
+    // If it's a custom section, also update the title in resumeData
+    setResumeData(prev => ({
+      ...prev,
+      customSections: prev.customSections.map(section =>
+        section.id === editingSectionId ? { ...section, title: editingSectionName } : section
+      )
+    }));
+
+    setEditingSectionId(null);
+    toast.success('Section name updated');
+  };
+
+  const handleDeleteSection = (sectionId: string, sectionType: SectionType, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Prevent deletion of core sections
+    const coreSections = ['personalDetails', 'contact', 'summary', 'experience', 'education', 'skills', 'links'];
+    if (coreSections.includes(sectionType)) {
+      toast.error('Cannot delete core resume sections');
+      return;
+    }
+
+    // Delete custom section
+    deleteCustomSection(sectionId);
+    toast.success('Section deleted');
+  };
+
   // Drag and drop handlers
   const handleDragStart = (index: number) => {
     setDraggedItem(index);
@@ -889,18 +937,24 @@ export function AIRewritePanel({
   // Navigate to next section
   const handleNextSection = () => {
     const visibleSections = getNavigationItems();
-    const currentIndex = visibleSections.findIndex(s => s.type === currentSection);
+    const currentIndex = visibleSections.findIndex(s => 
+      s.type === 'customSections' ? s.id === currentSection : s.type === currentSection
+    );
     if (currentIndex < visibleSections.length - 1) {
-      setCurrentSection(visibleSections[currentIndex + 1].type);
+      const nextSection = visibleSections[currentIndex + 1];
+      setCurrentSection(nextSection.type === 'customSections' ? nextSection.id : nextSection.type);
     }
   };
 
   // Navigate to previous section
   const handlePreviousSection = () => {
     const visibleSections = getNavigationItems();
-    const currentIndex = visibleSections.findIndex(s => s.type === currentSection);
+    const currentIndex = visibleSections.findIndex(s => 
+      s.type === 'customSections' ? s.id === currentSection : s.type === currentSection
+    );
     if (currentIndex > 0) {
-      setCurrentSection(visibleSections[currentIndex - 1].type);
+      const prevSection = visibleSections[currentIndex - 1];
+      setCurrentSection(prevSection.type === 'customSections' ? prevSection.id : prevSection.type);
     }
   };
 
@@ -919,12 +973,16 @@ export function AIRewritePanel({
   // Check if we're on the first/last section
   const isFirstSection = () => {
     const visibleSections = getNavigationItems();
-    return visibleSections[0]?.type === currentSection;
+    const firstSection = visibleSections[0];
+    if (!firstSection) return false;
+    return firstSection.type === 'customSections' ? firstSection.id === currentSection : firstSection.type === currentSection;
   };
 
   const isLastSection = () => {
     const visibleSections = getNavigationItems();
-    return visibleSections[visibleSections.length - 1]?.type === currentSection;
+    const lastSection = visibleSections[visibleSections.length - 1];
+    if (!lastSection) return false;
+    return lastSection.type === 'customSections' ? lastSection.id === currentSection : lastSection.type === currentSection;
   };
 
   const generateResumeText = (data: ResumeData): string => {
@@ -1042,9 +1100,7 @@ export function AIRewritePanel({
       {showSettings && (
         <div 
           ref={settingsRef}
-          className={`bg-white border-b shadow-sm p-6 transition-all duration-500 ${
-            highlightSettings ? 'ring-4 ring-amber-400 ring-offset-2 bg-amber-50' : ''
-          }`}
+          className="bg-white border-b shadow-sm p-6"
         >
           <div className="max-w-7xl mx-auto">
             {/* Header */}
@@ -1081,7 +1137,9 @@ export function AIRewritePanel({
               <p className="text-sm text-gray-600 text-center">Review and accept AI-generated improvements</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className={`grid grid-cols-2 gap-6 p-4 rounded-lg border-2 transition-all duration-500 ${
+              highlightSettings ? 'border-amber-400 bg-amber-50 shadow-lg' : 'border-transparent'
+            }`}>
               <div>
                 <Label htmlFor="industry-tone" className="text-sm mb-2 inline-block">
                   Industry Tone <span className="text-red-500">*</span>
@@ -1089,8 +1147,7 @@ export function AIRewritePanel({
                 <Select value={industryTone} onValueChange={setIndustryTone}>
                   <SelectTrigger 
                     ref={industryToneRef}
-                    id="industry-tone" 
-                    className={!industryTone ? 'border-2 border-amber-400 ring-2 ring-amber-200' : ''}
+                    id="industry-tone"
                   >
                     <SelectValue placeholder="Select an industry tone..." />
                   </SelectTrigger>
@@ -1115,8 +1172,7 @@ export function AIRewritePanel({
                 <Select value={rewriteStyle} onValueChange={setRewriteStyle}>
                   <SelectTrigger 
                     ref={rewriteStyleRef}
-                    id="rewrite-style" 
-                    className={!rewriteStyle ? 'border-2 border-amber-400 ring-2 ring-amber-200' : ''}
+                    id="rewrite-style"
                   >
                     <SelectValue placeholder="Select a rewrite style..." />
                   </SelectTrigger>
@@ -1154,37 +1210,105 @@ export function AIRewritePanel({
 
       <div className="flex h-[calc(100vh-80px)]">
         {/* Left Sidebar Navigation */}
-        <div className="w-64 bg-white border-r">
+        <div className="w-72 bg-white border-r">
           <ScrollArea className="h-full">
             <div className="p-4 space-y-1">
               {getNavigationItems().map((item) => {
-                const icons = {
-                  personalDetails: User,
-                  contact: Phone,
-                  summary: FileText,
-                  experience: Briefcase,
-                  education: GraduationCap,
-                  skills: Wrench,
-                  links: Link2,
-                  customSections: FileText
+                const iconConfig = {
+                  personalDetails: { Icon: User, color: 'text-blue-600 bg-blue-100' },
+                  contact: { Icon: Phone, color: 'text-green-600 bg-green-100' },
+                  summary: { Icon: FileText, color: 'text-purple-600 bg-purple-100' },
+                  experience: { Icon: Briefcase, color: 'text-orange-600 bg-orange-100' },
+                  education: { Icon: GraduationCap, color: 'text-indigo-600 bg-indigo-100' },
+                  skills: { Icon: Wrench, color: 'text-red-600 bg-red-100' },
+                  links: { Icon: Link2, color: 'text-teal-600 bg-teal-100' },
+                  customSections: { Icon: FileText, color: 'text-pink-600 bg-pink-100' }
                 };
-                const Icon = icons[item.type];
+                const { Icon, color } = iconConfig[item.type];
+                const isEditing = editingSectionId === item.id;
                 
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    onClick={() => {
-                      setCurrentSection(item.type);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      currentSection === item.type
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'hover:bg-gray-50 text-gray-700'
+                    className={`group w-full flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors ${
+                      (item.type === 'customSections' ? currentSection === item.id : currentSection === item.type)
+                        ? 'bg-blue-50'
+                        : 'hover:bg-gray-50'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
-                    <span className="text-sm">{item.label}</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        if (!isEditing) {
+                          // For custom sections, use the section ID, not the type
+                          setCurrentSection(item.type === 'customSections' ? item.id : item.type);
+                        }
+                      }}
+                      className="flex items-center gap-2 flex-1 min-w-0"
+                    >
+                      <div className={`p-1.5 rounded-md ${color} flex-shrink-0`}>
+                        <Icon className="w-3.5 h-3.5" />
+                      </div>
+                      {isEditing ? (
+                        <Input
+                          value={editingSectionName}
+                          onChange={(e) => setEditingSectionName(e.target.value)}
+                          onBlur={saveEditingSection}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              saveEditingSection();
+                            } else if (e.key === 'Escape') {
+                              setEditingSectionId(null);
+                            }
+                          }}
+                          className="h-7 text-sm flex-1"
+                          autoFocus
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span className={`text-sm truncate ${
+                          currentSection === item.type ? 'text-blue-600' : 'text-gray-700'
+                        }`}>
+                          {item.label}
+                        </span>
+                      )}
+                    </button>
+                    {!isEditing && (
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                onClick={(e) => startEditingSection(item.id, item.label, e)}
+                                className="p-1 hover:bg-gray-200 rounded"
+                              >
+                                <Pencil className="w-3 h-3 text-gray-500" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Edit section name</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        {item.type === 'customSections' && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={(e) => handleDeleteSection(item.id, item.type, e)}
+                                  className="p-1 hover:bg-red-100 rounded"
+                                >
+                                  <Trash2 className="w-3 h-3 text-red-500" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Delete section</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
               <Separator className="my-2" />
@@ -1797,9 +1921,9 @@ export function AIRewritePanel({
                 currentSection === section.id && (
                   <div key={section.id} className="space-y-6">
                     <div>
-                      <h2>Custom Section</h2>
+                      <h2>{section.title || 'Custom Section'}</h2>
                       <p className="text-gray-600 mt-2">
-                        Add additional sections like Awards, Publications, Projects, etc.
+                        Add content for this section. You can include bullet points, paragraphs, or any relevant information.
                       </p>
                     </div>
 
@@ -1967,10 +2091,18 @@ export function AIRewritePanel({
                               const marginLeft = indent * 24;
                               
                               if (item.type === 'bullet') {
-                                const bulletChar = item.bulletStyle === 'hollow' ? '○' : '•';
+                                // Determine bullet character based on style
+                                let bulletChar = '•';
+                                if (item.bulletStyle === 'number') {
+                                  bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                } else if (item.bulletStyle === 'hollow') {
+                                  bulletChar = '○';
+                                } else {
+                                  bulletChar = '•';
+                                }
                                 return (
                                   <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                    <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                    <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
                                     <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
                                   </div>
                                 );
@@ -2006,10 +2138,18 @@ export function AIRewritePanel({
                                     const marginLeft = indent * 24;
                                     
                                     if (item.type === 'bullet') {
-                                      const bulletChar = item.bulletStyle === 'hollow' ? '○' : '•';
+                                      // Determine bullet character based on style
+                                      let bulletChar = '•';
+                                      if (item.bulletStyle === 'number') {
+                                        bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                      } else if (item.bulletStyle === 'hollow') {
+                                        bulletChar = '○';
+                                      } else {
+                                        bulletChar = '•';
+                                      }
                                       return (
                                         <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                          <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                          <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
                                           <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
                                         </div>
                                       );
@@ -2049,10 +2189,18 @@ export function AIRewritePanel({
                                       const marginLeft = indent * 24;
                                       
                                       if (item.type === 'bullet') {
-                                        const bulletChar = item.bulletStyle === 'hollow' ? '○' : '•';
+                                        // Determine bullet character based on style
+                                        let bulletChar = '•';
+                                        if (item.bulletStyle === 'number') {
+                                          bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                        } else if (item.bulletStyle === 'hollow') {
+                                          bulletChar = '○';
+                                        } else {
+                                          bulletChar = '•';
+                                        }
                                         return (
                                           <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                            <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                            <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
                                             <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
                                           </div>
                                         );
@@ -2085,16 +2233,17 @@ export function AIRewritePanel({
                               if (item.type === 'bullet') {
                                 // Determine bullet character based on style
                                 let bulletChar = '•';
-                                if (item.bulletStyle === 'hollow') {
+                                if (item.bulletStyle === 'number') {
+                                  bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                } else if (item.bulletStyle === 'hollow') {
                                   bulletChar = '○'; // Hollow circle for sub-items
                                 } else if (item.bulletStyle === 'filled') {
                                   bulletChar = '•'; // Filled circle for main items
                                 }
-                                // For numbered lists, use CSS counter instead
                                 
                                 return (
                                   <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                    <span className="text-gray-600 mt-0.5">{bulletChar}</span>
+                                    <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
                                     <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
                                   </div>
                                 );
@@ -2125,21 +2274,37 @@ export function AIRewritePanel({
                       // Find the custom section that matches this section.id
                       const customSection = resumeData.customSections.find(cs => cs.id === section.id);
                       if (!customSection || !customSection.content) return null;
-                      const processedCustomContent = processHTMLBulletsWithFormatting(customSection.content);
+                      const processedCustomContent = processHTMLWithNesting(customSection.content);
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-2 uppercase">{customSection.title}</h3>
                           <div className="text-sm text-gray-700">
-                            {processedCustomContent.map((item, idx) => (
-                              item.type === 'bullet' ? (
-                                <div key={idx} className="flex items-start gap-2 mb-1">
-                                  <span className="text-gray-600 mt-0.5">•</span>
-                                  <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
-                                </div>
-                              ) : (
-                                <div key={idx} className="mb-1" dangerouslySetInnerHTML={{ __html: item.content }} />
-                              )
-                            ))}
+                            {processedCustomContent.map((item, idx) => {
+                              const indent = item.indent || 0;
+                              const marginLeft = indent * 24;
+                              
+                              if (item.type === 'bullet') {
+                                // Determine bullet character based on style
+                                let bulletChar = '•';
+                                if (item.bulletStyle === 'number') {
+                                  bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                } else if (item.bulletStyle === 'hollow') {
+                                  bulletChar = '○';
+                                } else {
+                                  bulletChar = '•';
+                                }
+                                return (
+                                  <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
+                                    <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
+                                    <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+                                  </div>
+                                );
+                              } else {
+                                return (
+                                  <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
+                                );
+                              }
+                            })}
                           </div>
                         </div>
                       );
