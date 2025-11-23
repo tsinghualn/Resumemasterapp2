@@ -2094,7 +2094,15 @@ export function AIRewritePanel({
                                 // Determine bullet character based on style
                                 let bulletChar = '•';
                                 if (item.bulletStyle === 'number') {
-                                  bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                  // Count how many numbered items at this indent level we've seen so far
+                                  const numberedItemsBeforeThis = processedSummary
+                                    .slice(0, idx)
+                                    .filter(prevItem => 
+                                      prevItem.type === 'bullet' && 
+                                      prevItem.bulletStyle === 'number' && 
+                                      (prevItem.indent || 0) === indent
+                                    ).length;
+                                  bulletChar = `${numberedItemsBeforeThis + 1}.`;
                                 } else if (item.bulletStyle === 'hollow') {
                                   bulletChar = '○';
                                 } else {
@@ -2141,7 +2149,15 @@ export function AIRewritePanel({
                                       // Determine bullet character based on style
                                       let bulletChar = '•';
                                       if (item.bulletStyle === 'number') {
-                                        bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                        // Count how many numbered items at this indent level we've seen so far
+                                        const numberedItemsBeforeThis = processedContent
+                                          .slice(0, idx)
+                                          .filter(prevItem => 
+                                            prevItem.type === 'bullet' && 
+                                            prevItem.bulletStyle === 'number' && 
+                                            (prevItem.indent || 0) === indent
+                                          ).length;
+                                        bulletChar = `${numberedItemsBeforeThis + 1}.`;
                                       } else if (item.bulletStyle === 'hollow') {
                                         bulletChar = '○';
                                       } else {
@@ -2192,7 +2208,15 @@ export function AIRewritePanel({
                                         // Determine bullet character based on style
                                         let bulletChar = '•';
                                         if (item.bulletStyle === 'number') {
-                                          bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                          // Count how many numbered items at this indent level we've seen so far
+                                          const numberedItemsBeforeThis = processedDetails
+                                            .slice(0, idx)
+                                            .filter(prevItem => 
+                                              prevItem.type === 'bullet' && 
+                                              prevItem.bulletStyle === 'number' && 
+                                              (prevItem.indent || 0) === indent
+                                            ).length;
+                                          bulletChar = `${numberedItemsBeforeThis + 1}.`;
                                         } else if (item.bulletStyle === 'hollow') {
                                           bulletChar = '○';
                                         } else {
@@ -2234,7 +2258,15 @@ export function AIRewritePanel({
                                 // Determine bullet character based on style
                                 let bulletChar = '•';
                                 if (item.bulletStyle === 'number') {
-                                  bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                  // Count how many numbered items at this indent level we've seen so far
+                                  const numberedItemsBeforeThis = processedSkills
+                                    .slice(0, idx)
+                                    .filter(prevItem => 
+                                      prevItem.type === 'bullet' && 
+                                      prevItem.bulletStyle === 'number' && 
+                                      (prevItem.indent || 0) === indent
+                                    ).length;
+                                  bulletChar = `${numberedItemsBeforeThis + 1}.`;
                                 } else if (item.bulletStyle === 'hollow') {
                                   bulletChar = '○'; // Hollow circle for sub-items
                                 } else if (item.bulletStyle === 'filled') {
@@ -2287,7 +2319,15 @@ export function AIRewritePanel({
                                 // Determine bullet character based on style
                                 let bulletChar = '•';
                                 if (item.bulletStyle === 'number') {
-                                  bulletChar = `${idx + 1}.`; // Use actual numbers for ordered lists
+                                  // Count how many numbered items at this indent level we've seen so far
+                                  const numberedItemsBeforeThis = processedCustomContent
+                                    .slice(0, idx)
+                                    .filter(prevItem => 
+                                      prevItem.type === 'bullet' && 
+                                      prevItem.bulletStyle === 'number' && 
+                                      (prevItem.indent || 0) === indent
+                                    ).length;
+                                  bulletChar = `${numberedItemsBeforeThis + 1}.`;
                                 } else if (item.bulletStyle === 'hollow') {
                                   bulletChar = '○';
                                 } else {

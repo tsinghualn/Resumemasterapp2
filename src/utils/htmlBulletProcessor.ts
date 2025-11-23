@@ -34,7 +34,13 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
   
   // Create a temporary DOM element to parse HTML
   const temp = document.createElement('div');
-  temp.innerHTML = htmlContent;
+  try {
+    temp.innerHTML = htmlContent;
+  } catch (error) {
+    console.error('Error parsing HTML:', error);
+    // Fallback to plain text processing
+    return processHTMLBulletsWithFormatting(htmlContent);
+  }
   
   function traverseListItem(li: HTMLElement, indent: number, isOrdered: boolean) {
     // Determine bullet style based on indent level
@@ -78,7 +84,7 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
         } else if (tag === 'br') {
           // Skip br tags
         } else {
-          // Inline formatting (strong, em, span, etc.) - preserve HTML
+          // Inline formatting (strong, em, b, i, span, etc.) - preserve HTML
           content += el.outerHTML;
         }
       }
@@ -231,7 +237,16 @@ export function processHTMLBulletsWithFormatting(htmlContent: string): Processed
     if (match) {
       // Extract content after bullet, preserving HTML formatting
       const bulletChar = match[1];
-      const bulletContent = match[2];
+      // Find the bullet character in the stripped HTML and extract content after it
+      const bulletIndex = stripped.indexOf(bulletChar);
+      let bulletContent = '';
+      if (bulletIndex !== -1) {
+        // Extract everything after the bullet character, preserving HTML
+        bulletContent = stripped.substring(bulletIndex + bulletChar.length).trim();
+      } else {
+        // Fallback to plain text extraction
+        bulletContent = match[2];
+      }
       
       // Determine bullet style based on character and indent level
       let bulletStyle: 'filled' | 'hollow' | 'number' = 'filled';

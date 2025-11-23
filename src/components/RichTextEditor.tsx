@@ -69,23 +69,11 @@ export function RichTextEditor({
         // Check if we're inside a list item
         const listItem = parentElement?.closest('li');
         
-        if (command === 'outdent' && listItem) {
-          // For outdent, check if this would remove the list item from the list
-          const parentList = listItem.parentElement;
-          if (parentList && (parentList.tagName === 'UL' || parentList.tagName === 'OL')) {
-            const grandParent = parentList.parentElement;
-            // If the parent list is NOT inside another list item, prevent outdent
-            // to avoid losing content
-            if (!grandParent?.closest('li')) {
-              console.log('Cannot outdent: would remove from list entirely');
-              isUpdatingRef.current = false;
-              return;
-            }
-          }
-        } else if (command === 'indent' && !listItem) {
-          // If not in a list, create one first
+        if (command === 'indent' && !listItem) {
+          // If not in a list, create one first before indenting
           document.execCommand('insertUnorderedList', false);
         }
+        // Allow outdent - browser will handle it appropriately
       }
       
       // Execute command
@@ -127,6 +115,20 @@ export function RichTextEditor({
         execCommand('italic');
       }
     }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    // Allow default drop behavior but trigger input to save changes
+    setTimeout(() => {
+      handleInput();
+    }, 50);
+  };
+
+  const handleDragEnd = () => {
+    // Trigger input after drag operation completes
+    setTimeout(() => {
+      handleInput();
+    }, 50);
   };
 
   return (
@@ -228,6 +230,8 @@ export function RichTextEditor({
         }}
         onPaste={handlePaste}
         onKeyDown={handleKeyDown}
+        onDrop={handleDrop}
+        onDragEnd={handleDragEnd}
         className="p-3 focus:outline-none text-sm"
         style={{ minHeight }}
         data-placeholder={placeholder}
