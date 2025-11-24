@@ -1,3 +1,30 @@
+/**
+ * AI Resume Parsing Feedback System
+ * 
+ * This component includes a feedback mechanism that allows users to rate the accuracy
+ * of AI parsing results for each section of their resume.
+ * 
+ * How it works:
+ * 1. Users see "Help us improve AI. Parsed correctly?" with thumbs up/down buttons
+ * 2. Thumbs up: Positive feedback is stored, confirming current parsing works well
+ * 3. Thumbs down: User is prompted to provide reasons for incorrect parsing
+ * 4. Feedback is stored in localStorage under 'aiParsingFeedback' key
+ * 5. For future resumes, feedback analysis can guide AI parsing improvements
+ * 
+ * Feedback data structure:
+ * {
+ *   section: string (e.g., 'personalDetails', 'experience'),
+ *   type: 'positive' | 'negative',
+ *   reason?: string (for negative feedback),
+ *   timestamp: number
+ * }
+ * 
+ * Future enhancement:
+ * - The feedbackAnalyzer utility can analyze patterns in negative feedback
+ * - Common issues are identified (e.g., "email parsing" mentioned 5 times)
+ * - Guidance is generated and passed to AI parsing endpoint
+ * - AI uses this guidance to improve parsing accuracy over time
+ */
 import { useState, useEffect, useRef } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
@@ -8,6 +35,7 @@ import { parseExperience } from '../utils/experienceParser';
 import { parseEducation } from '../utils/educationParser';
 import { RichTextEditor } from './RichTextEditor';
 import { AIImproveDialog } from './AIImproveDialog';
+import { FeedbackButtons } from './FeedbackButtons';
 import { processHTMLBulletsWithFormatting, processHTMLWithNesting } from '../utils/htmlBulletProcessor';
 import { 
   Select,
@@ -156,6 +184,11 @@ export function AIRewritePanel({
   
   // AI Improve dialog state
   const [improveDialogOpen, setImproveDialogOpen] = useState(false);
+  
+  // Feedback state
+  const [sectionFeedback, setSectionFeedback] = useState<Record<string, 'up' | 'down' | null>>({});
+  const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
+  const [feedbackReason, setFeedbackReason] = useState('');
   const [improveDialogContent, setImproveDialogContent] = useState('');
   const [improveDialogSectionType, setImproveDialogSectionType] = useState<'summary' | 'experience' | 'education' | 'skills' | 'custom'>('summary');
   const [improveDialogIsList, setImproveDialogIsList] = useState(false);
@@ -254,7 +287,15 @@ export function AIRewritePanel({
   };
 
   const parseResumeFromText = (text: string) => {
-    // Basic text parsing
+    // TODO: Future enhancement - Use AI parsing with feedback guidance
+    // import { generateParsingGuidance } from '../utils/feedbackAnalyzer';
+    // const guidance = generateParsingGuidance();
+    // if (guidance) {
+    //   const aiParsed = await apiClient.parseResumeWithAI(text, guidance);
+    //   // Use AI parsed results
+    // }
+    
+    // Basic text parsing (current implementation)
     const lines = text.split('\n').filter(line => line.trim());
     
     // Extract name from first line
@@ -958,6 +999,52 @@ export function AIRewritePanel({
     }
   };
 
+  // Track which section is being given feedback
+  const [currentFeedbackSection, setCurrentFeedbackSection] = useState<string>('');
+
+  // Feedback handling
+  const handleThumbsUp = (sectionId: string) => {
+    setSectionFeedback(prev => ({ ...prev, [sectionId]: 'up' }));
+    toast.success('Thank you for your feedback!');
+    
+    // Store positive feedback (keeps current prompt)
+    const existingFeedback = JSON.parse(localStorage.getItem('aiParsingFeedback') || '[]');
+    existingFeedback.push({
+      section: sectionId,
+      type: 'positive',
+      timestamp: Date.now()
+    });
+    localStorage.setItem('aiParsingFeedback', JSON.stringify(existingFeedback));
+  };
+
+  const handleThumbsDown = (sectionId: string) => {
+    setSectionFeedback(prev => ({ ...prev, [sectionId]: 'down' }));
+    setCurrentFeedbackSection(sectionId);
+    setShowFeedbackDialog(true);
+  };
+
+  const submitFeedback = () => {
+    if (!feedbackReason.trim()) {
+      toast.error('Please provide a reason for your feedback');
+      return;
+    }
+
+    // Store negative feedback with reason
+    const existingFeedback = JSON.parse(localStorage.getItem('aiParsingFeedback') || '[]');
+    existingFeedback.push({
+      section: currentFeedbackSection,
+      type: 'negative',
+      reason: feedbackReason,
+      timestamp: Date.now()
+    });
+    localStorage.setItem('aiParsingFeedback', JSON.stringify(existingFeedback));
+
+    toast.success('Thank you for helping us improve!');
+    setShowFeedbackDialog(false);
+    setFeedbackReason('');
+    setCurrentFeedbackSection('');
+  };
+
   // Finalize and go to next screen
   const handleFinish = async () => {
     if (!industryTone || !rewriteStyle) {
@@ -1447,6 +1534,14 @@ export function AIRewritePanel({
                       </div>
                     </div>
                   )}
+                  
+                  <FeedbackButtons
+                    sectionId="personalDetails"
+                    currentFeedback={sectionFeedback['personalDetails'] as 'up' | 'down' | undefined}
+                    onThumbsUp={handleThumbsUp}
+                    onThumbsDown={handleThumbsDown}
+                    className="mt-6"
+                  />
                 </div>
               )}
 
@@ -1511,6 +1606,14 @@ export function AIRewritePanel({
                       placeholder="www.yourwebsite.com"
                     />
                   </div>
+                  
+                  <FeedbackButtons
+                    sectionId="contact"
+                    currentFeedback={sectionFeedback['contact'] as 'up' | 'down' | undefined}
+                    onThumbsUp={handleThumbsUp}
+                    onThumbsDown={handleThumbsDown}
+                    className="mt-6"
+                  />
                 </div>
               )}
 
@@ -1561,6 +1664,14 @@ export function AIRewritePanel({
                         AI will optimize this using {industryTone} tone with {rewriteStyle} style
                       </p>
                     )}
+                    
+                    <FeedbackButtons
+                      sectionId="summary"
+                      currentFeedback={sectionFeedback['summary'] as 'up' | 'down' | undefined}
+                      onThumbsUp={handleThumbsUp}
+                      onThumbsDown={handleThumbsDown}
+                      className="mt-4"
+                    />
                   </div>
                 </div>
               )}
@@ -1683,6 +1794,13 @@ export function AIRewritePanel({
                             minHeight="120px"
                           />
                         </div>
+                        
+                        <FeedbackButtons
+                          sectionId={`experience-${exp.id}`}
+                          currentFeedback={sectionFeedback[`experience-${exp.id}`] as 'up' | 'down' | undefined}
+                          onThumbsUp={handleThumbsUp}
+                          onThumbsDown={handleThumbsDown}
+                        />
                       </div>
                     </Card>
                   ))}
@@ -1811,6 +1929,13 @@ export function AIRewritePanel({
                             minHeight="100px"
                           />
                         </div>
+                        
+                        <FeedbackButtons
+                          sectionId={`education-${edu.id}`}
+                          currentFeedback={sectionFeedback[`education-${edu.id}`] as 'up' | 'down' | undefined}
+                          onThumbsUp={handleThumbsUp}
+                          onThumbsDown={handleThumbsDown}
+                        />
                       </div>
                     </Card>
                   ))}
@@ -1869,6 +1994,14 @@ export function AIRewritePanel({
                       placeholder="• JavaScript, TypeScript, Python\n• React, Node.js, Express\n• SQL, MongoDB, PostgreSQL"
                       minHeight="200px"
                     />
+                    
+                    <FeedbackButtons
+                      sectionId="skills"
+                      currentFeedback={sectionFeedback['skills'] as 'up' | 'down' | undefined}
+                      onThumbsUp={handleThumbsUp}
+                      onThumbsDown={handleThumbsDown}
+                      className="mt-4"
+                    />
                   </div>
                 </div>
               )}
@@ -1913,6 +2046,14 @@ export function AIRewritePanel({
                     <Plus className="w-4 h-4 mr-2" />
                     Add link
                   </Button>
+                  
+                  <FeedbackButtons
+                    sectionId="links"
+                    currentFeedback={sectionFeedback['links'] as 'up' | 'down' | undefined}
+                    onThumbsUp={handleThumbsUp}
+                    onThumbsDown={handleThumbsDown}
+                    className="mt-6"
+                  />
                 </div>
               )}
 
@@ -1970,6 +2111,14 @@ export function AIRewritePanel({
                         minHeight="150px"
                       />
                     </div>
+                    
+                    <FeedbackButtons
+                      sectionId={section.id}
+                      currentFeedback={sectionFeedback[section.id] as 'up' | 'down' | undefined}
+                      onThumbsUp={handleThumbsUp}
+                      onThumbsDown={handleThumbsDown}
+                      className="mb-4"
+                    />
 
                     <Button
                       variant="outline"
@@ -2434,6 +2583,41 @@ export function AIRewritePanel({
         }}
         isList={improveDialogIsList}
       />
+
+      {/* Feedback Dialog */}
+      <Dialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Help Us Improve</DialogTitle>
+            <DialogDescription>
+              Please tell us what went wrong with the parsing so we can improve it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Textarea
+              value={feedbackReason}
+              onChange={(e) => setFeedbackReason(e.target.value)}
+              placeholder="E.g., 'The email was parsed incorrectly' or 'Experience dates are wrong'"
+              rows={4}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowFeedbackDialog(false);
+                  setFeedbackReason('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={submitFeedback}>
+                Submit Feedback
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -139,6 +139,13 @@ export class ApiClient {
     });
   }
 
+  async parseResumeWithAI(resumeText: string, feedbackGuidance?: string) {
+    return this.request('/parse-resume', {
+      method: 'POST',
+      body: JSON.stringify({ resumeText, feedbackGuidance }),
+    });
+  }
+
   async uploadFile(file: File) {
     const formData = new FormData();
     formData.append('file', file);

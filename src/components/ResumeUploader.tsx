@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react';
-import { Card } from './ui/card';
 import { Button } from './ui/button';
-import { Progress } from './ui/progress';
-import { Upload, FileText, Sparkles, Briefcase } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, Sparkles, Briefcase } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { generateParsingGuidance, getFeedbackStats } from '../utils/feedbackAnalyzer';
+import { Card } from './ui/card';
+import { Progress } from './ui/progress';
 
 interface ResumeUploaderProps {
   onResumeUpload: (content: string, fileName: string, parsedData?: ResumeData) => void;
@@ -68,6 +69,19 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
     setProgressStage('parsing');
     setProgress(30);
     
+    // Generate feedback guidance from previous user feedback
+    const feedbackGuidance = generateParsingGuidance();
+    const stats = getFeedbackStats();
+    
+    // Show feedback info if available
+    if (feedbackGuidance && stats.total > 0) {
+      console.log(`📊 Using ${stats.total} previous feedback items to improve parsing`);
+      toast.info(`Learning from ${stats.total} previous feedback items`, {
+        description: `Success rate: ${stats.successRate.toFixed(1)}%`,
+        duration: 3000,
+      });
+    }
+    
     // Smooth progress animation for parsing (30% to 90%)
     const parsingInterval = setInterval(() => {
       setProgress((prev) => {
@@ -88,7 +102,8 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
             'Authorization': `Bearer ${publicAnonKey}`,
           },
           body: JSON.stringify({
-            resumeText: text
+            resumeText: text,
+            feedbackGuidance: feedbackGuidance || undefined
           })
         }
       );

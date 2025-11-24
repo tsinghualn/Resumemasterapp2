@@ -72,6 +72,23 @@ export function RichTextEditor({
         if (command === 'indent' && !listItem) {
           // If not in a list, create one first before indenting
           document.execCommand('insertUnorderedList', false);
+          // Re-get the selection after creating the list
+          const newSelection = window.getSelection();
+          if (newSelection && newSelection.rangeCount > 0) {
+            // Small delay to let DOM update
+            setTimeout(() => {
+              document.execCommand('indent', false);
+              // Force content update with additional delay
+              setTimeout(() => {
+                if (editorRef.current) {
+                  console.log('After indent, content:', editorRef.current.innerHTML);
+                  onChange(editorRef.current.innerHTML);
+                }
+                isUpdatingRef.current = false;
+              }, 50);
+            }, 10);
+            return; // Exit early since we're handling async
+          }
         }
         // Allow outdent - browser will handle it appropriately
       }
@@ -83,14 +100,16 @@ export function RichTextEditor({
         console.warn(`Command ${command} failed`);
       }
       
+      console.log(`Command ${command} executed, HTML:`, editorRef.current.innerHTML);
+      
       // Trigger onChange with new content - add small delay to ensure DOM updates
       setTimeout(() => {
         if (editorRef.current) {
-          console.log('Editor content after command:', editorRef.current.innerHTML);
+          console.log('After timeout, content:', editorRef.current.innerHTML);
           onChange(editorRef.current.innerHTML);
         }
         isUpdatingRef.current = false;
-      }, 10); // Increased from 0 to 10ms
+      }, 50); // Increased from 10 to 50ms
     } catch (error) {
       console.error('Error executing command:', error);
       isUpdatingRef.current = false;

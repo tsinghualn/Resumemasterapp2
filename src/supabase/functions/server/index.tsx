@@ -80,7 +80,7 @@ app.get("/make-server-bc1c5df9/health", (c) => {
 // AI-powered resume parsing endpoint
 app.post("/make-server-bc1c5df9/parse-resume", async (c) => {
   try {
-    const { resumeText } = await c.req.json();
+    const { resumeText, feedbackGuidance } = await c.req.json();
 
     if (!resumeText) {
       return c.json({ error: 'Resume text is required' }, 400);
@@ -97,10 +97,13 @@ app.post("/make-server-bc1c5df9/parse-resume", async (c) => {
     }
 
     console.log(`✅ Parsing resume with AI (text length: ${resumeText.length} chars)...`);
+    if (feedbackGuidance) {
+      console.log(`📊 Using feedback guidance: ${feedbackGuidance.substring(0, 100)}...`);
+    }
 
     const systemPrompt = `You are an expert resume parser that extracts content EXACTLY as written. You are a COPY MACHINE, not a writer.
 
-MOST CRITICAL RULES - FOLLOW THESE FIRST:
+${feedbackGuidance ? `\n🔍 IMPORTANT FEEDBACK FROM PREVIOUS USERS:\n${feedbackGuidance}\nPlease pay special attention to these areas based on user feedback.\n\n` : ''}MOST CRITICAL RULES - FOLLOW THESE FIRST:
 
 WHITESPACE AND FORMATTING PRESERVATION (CRITICAL):
 - **DO NOT add extra spaces** in names, titles, or any text

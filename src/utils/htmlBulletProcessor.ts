@@ -42,7 +42,14 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
     return processHTMLBulletsWithFormatting(htmlContent);
   }
   
+  console.log('=== PARSING HTML LISTS ===');
+  console.log('Raw HTML:', htmlContent);
+  console.log('Temp innerHTML:', temp.innerHTML);
+  console.log('Temp children:', temp.children);
+  
   function traverseListItem(li: HTMLElement, indent: number, isOrdered: boolean) {
+    console.log(`Processing LI at indent ${indent}, isOrdered: ${isOrdered}`, li.outerHTML);
+    
     // Determine bullet style based on indent level
     let bulletStyle: 'filled' | 'hollow' | 'number' = 'filled';
     if (isOrdered) {
@@ -55,17 +62,25 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
     
     // Extract text content from li, but stop at nested lists
     let content = '';
+    let hasNestedList = false;
+    
+    console.log('  Child nodes:', li.childNodes);
     
     for (const child of Array.from(li.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE) {
-        content += child.textContent || '';
+        const textContent = child.textContent || '';
+        content += textContent;
+        console.log('  Added text:', textContent);
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         const el = child as HTMLElement;
         const tag = el.tagName.toLowerCase();
+        console.log('  Found element:', tag, el.outerHTML);
         
         if (tag === 'ul' || tag === 'ol') {
-          // Found nested list - first add current content, then process nested list
+          hasNestedList = true;
+          // Found nested list - first add current content if any, then process nested list
           if (content.trim()) {
+            console.log('  Adding content before nested list:', content.trim());
             processed.push({
               type: 'bullet',
               content: content.trim(),
@@ -76,22 +91,30 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
           }
           
           // Process nested list items with increased indent
+          console.log('  Processing nested list with', el.children.length, 'items');
           Array.from(el.children).forEach(nestedLi => {
             if (nestedLi.tagName.toLowerCase() === 'li') {
               traverseListItem(nestedLi as HTMLElement, indent + 1, tag === 'ol');
             }
           });
         } else if (tag === 'br') {
-          // Skip br tags
+          // Skip br tags but add space if needed
+          if (content && !content.endsWith(' ')) {
+            content += ' ';
+          }
         } else {
           // Inline formatting (strong, em, b, i, span, etc.) - preserve HTML
           content += el.outerHTML;
+          console.log('  Added HTML:', el.outerHTML);
         }
       }
     }
     
     // Add remaining content if any
+    // Important: Even if hasNestedList is true, still add content if it exists
+    // This handles cases where an item has both text and nested items
     if (content.trim()) {
+      console.log('  Adding final content:', content.trim());
       processed.push({
         type: 'bullet',
         content: content.trim(),
@@ -99,6 +122,7 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
         bulletStyle
       });
     }
+    console.log('  LI processing complete. hasNestedList:', hasNestedList, 'final content:', content);
   }
   
   function traverseNode(node: Node, indent: number = 0) {
@@ -133,6 +157,10 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
   
   // Start traversal
   Array.from(temp.childNodes).forEach(node => traverseNode(node, currentIndent));
+  
+  console.log('=== PARSING COMPLETE ===');
+  console.log('Processed items:', processed);
+  console.log('========================');
   
   return processed;
 }
