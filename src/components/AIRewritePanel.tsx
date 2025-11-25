@@ -2382,7 +2382,10 @@ export function AIRewritePanel({
 
                     case 'summary':
                       if (!resumeData.summary) return null;
+                      console.log('📄 SUMMARY PREVIEW - Raw HTML:', resumeData.summary);
                       const processedSummary = processHTMLWithNesting(resumeData.summary);
+                      console.log('📄 SUMMARY PREVIEW - Processed items:', processedSummary);
+                      console.log('📄 SUMMARY PREVIEW - Item count:', processedSummary.length);
                       return (
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-2 uppercase">Professional Summary</h3>
@@ -2390,6 +2393,19 @@ export function AIRewritePanel({
                             {processedSummary.map((item, idx) => {
                               const indent = item.indent || 0;
                               const marginLeft = indent * 24;
+                              
+                              // Skip items with no content
+                              if (!item.content || !item.content.trim()) {
+                                console.warn('⚠️ Skipping empty item in preview:', item);
+                                return null;
+                              }
+                              
+                              console.log(`✅ Rendering item ${idx}:`, { 
+                                type: item.type, 
+                                indent, 
+                                contentLength: item.content.length,
+                                contentPreview: item.content.substring(0, 50) 
+                              });
                               
                               if (item.type === 'bullet') {
                                 // Determine bullet character based on style
@@ -2431,7 +2447,10 @@ export function AIRewritePanel({
                         <div key={section.id}>
                           <h3 className="text-sm font-semibold mb-3 uppercase">Employment History</h3>
                           {resumeData.experience.map((exp) => {
+                            console.log('💼 EXPERIENCE PREVIEW - Raw HTML:', exp.description);
                             const processedContent = processHTMLWithNesting(exp.description);
+                            console.log('💼 EXPERIENCE PREVIEW - Processed items:', processedContent);
+                            console.log('💼 EXPERIENCE PREVIEW - Item count:', processedContent.length);
                             return (
                               <div key={exp.id} className="mb-4">
                                 <div className="font-medium text-sm">{exp.title}</div>
@@ -2445,6 +2464,12 @@ export function AIRewritePanel({
                                   {processedContent.map((item, idx) => {
                                     const indent = item.indent || 0;
                                     const marginLeft = indent * 24;
+                                    
+                                    // Skip items with no content
+                                    if (!item.content || !item.content.trim()) {
+                                      console.warn('Skipping empty item in experience preview:', item);
+                                      return null;
+                                    }
                                     
                                     if (item.type === 'bullet') {
                                       // Determine bullet character based on style

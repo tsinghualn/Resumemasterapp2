@@ -1,7 +1,10 @@
+import { useState, useEffect } from 'react';
 import { createClient } from './utils/supabase/client';
 import { apiClient } from './utils/api';
 import { projectId } from './utils/supabase/info.tsx';
 import { toast } from 'sonner@2.0.3';
+import { FileText, Home, LogOut, Settings } from 'lucide-react';
+import { Button } from './components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -10,8 +13,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from './components/ui/dialog';
+import { LandingPage } from './components/LandingPage';
+import { ResumeUploader } from './components/ResumeUploader';
+import { AuthDialog } from './components/AuthDialog';
+import { AIRewritePanel } from './components/AIRewritePanel';
+import { JobDescriptionScreen } from './components/JobDescriptionScreen';
+import { JobMatchScore } from './components/JobMatchScore';
+import { ResumePreview } from './components/ResumePreview';
+import { Dashboard } from './components/Dashboard';
+import { SystemStatus } from './components/SystemStatus';
+import { AITestPanel } from './components/AITestPanel';
+import { EmailVerificationInfo } from './components/EmailVerificationInfo';
 
-type Screen = 'landing' | 'upload' | 'jobdesc' | 'optimize' | 'matchscore' | 'preview' | 'dashboard';
+type Screen = 'landing' | 'upload' | 'jobdesc' | 'optimize' | 'matchscore' | 'preview' | 'dashboard' | 'parsed';
 type AuthMode = 'signin' | 'signup';
 
 interface ResumeData {
@@ -798,15 +812,17 @@ CERTIFICATIONS
   if (currentScreen === 'parsed') {
     return (
       <>
-        <ParsedResumeEditor
-          content={resumeContent}
-          fileName={uploadedFileName}
-          onChange={setResumeContent}
+        <AIRewritePanel
+          originalResume={resumeContent}
+          jobDescription={jobDescription}
           onBack={handleBackToUpload}
-          onContinue={handleContinueToJobDesc}
-          isEditMode={isEditMode}
-          cachedData={cachedResumeData}
-          onDataChange={setCachedResumeData}
+          onNext={(optimizedResume) => {
+            setModifiedResume(optimizedResume);
+            handleContinueToJobDesc();
+          }}
+          onPreview={() => setCurrentScreen('preview')}
+          optimizationFlow={'direct'}
+          cachedParsedData={cachedResumeData}
         />
         <AuthDialog
           open={authDialogOpen}

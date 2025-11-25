@@ -2265,4 +2265,82 @@ app.put("/make-server-bc1c5df9/feedback/:id", async (c) => {
   }
 });
 
+// ============= FEEDBACK ANALYSIS ENDPOINTS =============
+
+// Get latest feedback analysis
+app.get("/make-server-bc1c5df9/latest-analysis", async (c) => {
+  try {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL'),
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    );
+
+    // Get all feedback analysis records
+    const { data, error } = await supabase
+      .from('kv_store_bc1c5df9')
+      .select('key, value')
+      .like('key', 'feedback_analysis_%')
+      .order('key', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('Error fetching latest analysis:', error);
+      return c.json({ error: 'Failed to fetch analysis' }, 500);
+    }
+
+    if (!data || data.length === 0) {
+      return c.json({ 
+        analysis: null,
+        message: 'No analysis found. Run the first analysis to see results.' 
+      });
+    }
+
+    return c.json({ 
+      analysis: data[0].value,
+      analysis_id: data[0].key
+    });
+  } catch (error) {
+    console.error('Error in latest-analysis endpoint:', error);
+    return c.json({ 
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+// Get feedback analysis history (last 7 days)
+app.get("/make-server-bc1c5df9/analysis-history", async (c) => {
+  try {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL'),
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    );
+
+    const { data, error } = await supabase
+      .from('kv_store_bc1c5df9')
+      .select('key, value')
+      .like('key', 'feedback_analysis_%')
+      .order('key', { ascending: false })
+      .limit(7);
+
+    if (error) {
+      console.error('Error fetching analysis history:', error);
+      return c.json({ error: 'Failed to fetch history' }, 500);
+    }
+
+    const analyses = data?.map(item => ({
+      id: item.key,
+      ...item.value
+    })) || [];
+
+    return c.json({ analyses });
+  } catch (error) {
+    console.error('Error in analysis-history endpoint:', error);
+    return c.json({ 
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
 Deno.serve(app.fetch);

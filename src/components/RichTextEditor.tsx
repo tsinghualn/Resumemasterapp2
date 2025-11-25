@@ -32,8 +32,17 @@ export function RichTextEditor({
   useEffect(() => {
     if (editorRef.current && !isFocused && !isUpdatingRef.current) {
       // Only update if content actually changed
-      if (editorRef.current.innerHTML !== value) {
+      const currentHTML = editorRef.current.innerHTML;
+      if (currentHTML !== value) {
+        console.log('Initializing editor with value:', value);
         editorRef.current.innerHTML = value || '';
+        
+        // Verify content was set correctly
+        if (value && value.trim() && !editorRef.current.innerHTML) {
+          console.error('ERROR: Failed to set editor content!');
+          console.error('Value:', value);
+          console.error('Editor innerHTML after set:', editorRef.current.innerHTML);
+        }
       }
     }
   }, [value, isFocused]);
@@ -71,24 +80,39 @@ export function RichTextEditor({
         
         if (command === 'indent' && !listItem) {
           // If not in a list, create one first before indenting
+          console.log('Not in list, creating list first...');
           document.execCommand('insertUnorderedList', false);
-          // Re-get the selection after creating the list
-          const newSelection = window.getSelection();
-          if (newSelection && newSelection.rangeCount > 0) {
-            // Small delay to let DOM update
+          
+          // Wait for list to be created, then indent
+          setTimeout(() => {
+            console.log('List created, now indenting...');
+            const success = document.execCommand('indent', false);
+            console.log('Indent command result:', success);
+            
+            // Wait for indent to complete, then capture content
             setTimeout(() => {
-              document.execCommand('indent', false);
-              // Force content update with additional delay
-              setTimeout(() => {
-                if (editorRef.current) {
-                  console.log('After indent, content:', editorRef.current.innerHTML);
-                  onChange(editorRef.current.innerHTML);
+              if (editorRef.current) {
+                const content = editorRef.current.innerHTML;
+                console.log('After indent, captured content:', content);
+                
+                // Verify content is not empty
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = content;
+                const textContent = tempDiv.textContent || '';
+                
+                if (textContent.trim()) {
+                  console.log('Content verified, calling onChange');
+                  onChange(content);
+                } else {
+                  console.error('ERROR: Content is empty after indent!');
+                  console.error('Editor innerHTML:', editorRef.current.innerHTML);
+                  console.error('Editor outerHTML:', editorRef.current.outerHTML);
                 }
-                isUpdatingRef.current = false;
-              }, 50);
-            }, 10);
-            return; // Exit early since we're handling async
-          }
+              }
+              isUpdatingRef.current = false;
+            }, 100); // Increased delay for better reliability
+          }, 50);
+          return; // Exit early since we're handling async
         }
         // Allow outdent - browser will handle it appropriately
       }
@@ -100,16 +124,17 @@ export function RichTextEditor({
         console.warn(`Command ${command} failed`);
       }
       
-      console.log(`Command ${command} executed, HTML:`, editorRef.current.innerHTML);
+      console.log(`Command ${command} executed`);
       
-      // Trigger onChange with new content - add small delay to ensure DOM updates
+      // Trigger onChange with new content - add delay to ensure DOM updates
       setTimeout(() => {
         if (editorRef.current) {
-          console.log('After timeout, content:', editorRef.current.innerHTML);
-          onChange(editorRef.current.innerHTML);
+          const content = editorRef.current.innerHTML;
+          console.log('After command, content:', content);
+          onChange(content);
         }
         isUpdatingRef.current = false;
-      }, 50); // Increased from 10 to 50ms
+      }, 100); // Increased from 50 to 100ms for better reliability
     } catch (error) {
       console.error('Error executing command:', error);
       isUpdatingRef.current = false;

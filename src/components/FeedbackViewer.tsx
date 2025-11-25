@@ -19,6 +19,7 @@ import {
 import { Download, Trash2, TrendingUp, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { ScrollArea } from './ui/scroll-area';
+import { FeedbackAnalysisStatus } from './FeedbackAnalysisStatus';
 
 export function FeedbackViewer() {
   const [feedback, setFeedback] = useState<ParseFeedback[]>([]);
@@ -79,6 +80,9 @@ export function FeedbackViewer() {
           </Button>
         </div>
       </div>
+
+      {/* Daily Feedback Analysis Status */}
+      <FeedbackAnalysisStatus />
 
       {/* Statistics */}
       {stats && (

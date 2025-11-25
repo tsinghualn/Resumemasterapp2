@@ -14,15 +14,24 @@ export interface ProcessedContent {
 export function processHTMLWithNesting(htmlContent: string): ProcessedContent[] {
   if (!htmlContent) return [];
   
+  console.log('=== processHTMLWithNesting START ===');
+  console.log('Input HTML:', htmlContent);
+  
   // Check if content has proper HTML list tags (<ul>, <ol>)
   const hasListTags = /<ul|<ol/i.test(htmlContent);
   
   if (hasListTags) {
+    console.log('Detected list tags, using parseHTMLLists');
     // Parse HTML and preserve list structure
-    return parseHTMLLists(htmlContent);
+    const result = parseHTMLLists(htmlContent);
+    console.log('parseHTMLLists result:', result);
+    return result;
   } else {
+    console.log('No list tags, using processHTMLBulletsWithFormatting');
     // Fallback to line-by-line processing for plain text with bullets
-    return processHTMLBulletsWithFormatting(htmlContent);
+    const result = processHTMLBulletsWithFormatting(htmlContent);
+    console.log('processHTMLBulletsWithFormatting result:', result);
+    return result;
   }
 }
 
@@ -78,19 +87,7 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
         
         if (tag === 'ul' || tag === 'ol') {
           hasNestedList = true;
-          // Found nested list - first add current content if any, then process nested list
-          if (content.trim()) {
-            console.log('  Adding content before nested list:', content.trim());
-            processed.push({
-              type: 'bullet',
-              content: content.trim(),
-              indent,
-              bulletStyle
-            });
-            content = '';
-          }
-          
-          // Process nested list items with increased indent
+          // Found nested list - process nested list items with increased indent
           console.log('  Processing nested list with', el.children.length, 'items');
           Array.from(el.children).forEach(nestedLi => {
             if (nestedLi.tagName.toLowerCase() === 'li') {
@@ -110,19 +107,24 @@ function parseHTMLLists(htmlContent: string, currentIndent: number = 0): Process
       }
     }
     
-    // Add remaining content if any
-    // Important: Even if hasNestedList is true, still add content if it exists
-    // This handles cases where an item has both text and nested items
-    if (content.trim()) {
-      console.log('  Adding final content:', content.trim());
+    // CRITICAL FIX: Add content only if it's not just whitespace
+    // This prevents empty parent LIs from adding blank entries
+    const trimmedContent = content.trim();
+    if (trimmedContent) {
+      console.log('  Adding content:', trimmedContent, 'at indent', indent);
       processed.push({
         type: 'bullet',
-        content: content.trim(),
+        content: trimmedContent,
         indent,
         bulletStyle
       });
+    } else if (!hasNestedList) {
+      // If there's no content AND no nested list, this might be an empty LI
+      // This shouldn't normally happen, but log it for debugging
+      console.warn('  Empty LI with no nested list detected:', li.outerHTML);
     }
-    console.log('  LI processing complete. hasNestedList:', hasNestedList, 'final content:', content);
+    
+    console.log('  LI processing complete. hasNestedList:', hasNestedList, 'content added:', !!trimmedContent);
   }
   
   function traverseNode(node: Node, indent: number = 0) {
@@ -223,85 +225,131 @@ export function processHTMLBullets(htmlContent: string): ProcessedContent[] {
 
 /**
  * Alternative version that keeps some HTML formatting (bold, italic, etc.)
+ * ENHANCED: Now handles blockquote and elements with margin-left styling
  */
 export function processHTMLBulletsWithFormatting(htmlContent: string): ProcessedContent[] {
   if (!htmlContent) return [];
   
-  // Replace line break tags with newlines but keep formatting tags
-  let content = htmlContent
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<p>/gi, '')
-    .replace(/<div>/gi, '');
+  console.log('=== processHTMLBulletsWithFormatting ===');
+  console.log('Input:', htmlContent);
   
-  // Split by lines
-  const lines = content.split('\n');
+  // Create a temporary DOM element to parse HTML more accurately
+  const temp = document.createElement('div');
+  temp.innerHTML = htmlContent;
+  
   const processed: ProcessedContent[] = [];
   
-  // Bullet patterns
-  const bulletPattern = /^[\s]*(●|•|○|o|■|□|▪|▫|➤|→|➔|➢|➣|➥|⇒|⇨|-|–|—|\*|\d+\.)\s*(.+)$/;
+  // Helper function to extract indent from element
+  function getIndentLevel(element: HTMLElement): number {
+    // Check for blockquote (typically 1 indent level)
+    if (element.tagName.toLowerCase() === 'blockquote') {
+      return 1;
+    }
+    
+    // Check for margin-left or padding-left in style
+    const style = element.style;
+    if (style.marginLeft) {
+      const marginValue = parseInt(style.marginLeft);
+      if (!isNaN(marginValue)) {
+        // Each 40px of margin = 1 indent level (browser default)
+        return Math.floor(marginValue / 40);
+      }
+    }
+    if (style.paddingLeft) {
+      const paddingValue = parseInt(style.paddingLeft);
+      if (!isNaN(paddingValue)) {
+        return Math.floor(paddingValue / 40);
+      }
+    }
+    
+    return 0;
+  }
   
-  for (const line of lines) {
-    // Strip outer HTML tags but keep inline formatting
-    const stripped = line.replace(/^<[^>]+>|<\/[^>]+>$/g, '').trim();
-    if (!stripped) continue;
-    
-    // Detect indentation from the ORIGINAL line (before trimming)
-    // Count leading spaces/whitespace
-    const leadingWhitespace = line.match(/^(\s*)/)?.[1] || '';
-    const spaceCount = leadingWhitespace.length;
-    
-    // Calculate indent level (every 4 spaces = 1 indent level)
-    // Also check for &nbsp; entities which are often used for indentation
-    const nbspCount = (leadingWhitespace.match(/&nbsp;/g) || []).length;
-    const totalIndent = Math.floor((spaceCount + nbspCount * 6) / 4);
-    
-    // Check if line starts with a bullet (even if bullet is inside HTML)
-    const plainText = stripped.replace(/<[^>]+>/g, '');
-    const match = plainText.match(bulletPattern);
-    
-    if (match) {
-      // Extract content after bullet, preserving HTML formatting
-      const bulletChar = match[1];
-      // Find the bullet character in the stripped HTML and extract content after it
-      const bulletIndex = stripped.indexOf(bulletChar);
-      let bulletContent = '';
-      if (bulletIndex !== -1) {
-        // Extract everything after the bullet character, preserving HTML
-        bulletContent = stripped.substring(bulletIndex + bulletChar.length).trim();
+  // Process each child node
+  function processNode(node: Node, currentIndent: number = 0): void {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent?.trim();
+      if (text) {
+        console.log('  Text node:', text, 'indent:', currentIndent);
+        processed.push({
+          type: 'text',
+          content: text,
+          indent: currentIndent
+        });
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as HTMLElement;
+      const tagName = element.tagName.toLowerCase();
+      
+      console.log('  Element:', tagName, 'indent:', currentIndent);
+      
+      // Calculate indent for this element
+      const elementIndent = getIndentLevel(element);
+      const totalIndent = currentIndent + elementIndent;
+      
+      // Handle different element types
+      if (tagName === 'br') {
+        // Skip br tags
+        return;
+      } else if (tagName === 'blockquote' || tagName === 'p' || tagName === 'div') {
+        // Process content inside block elements
+        const content = element.innerHTML;
+        
+        // Check if content has bullets
+        const plainText = element.textContent?.trim() || '';
+        const bulletPattern = /^[\\s]*(●|•|○|o|■|□|▪|▫|➤|→|➔|➢|➣|➥|⇒|⇨|-|–|—|\\*|\\d+\\.)\\s*(.+)$/;
+        const match = plainText.match(bulletPattern);
+        
+        if (match && plainText) {
+          // This is a bullet item
+          const bulletChar = match[1];
+          let bulletStyle: 'filled' | 'hollow' | 'number' = 'filled';
+          
+          if (bulletChar === '○' || bulletChar === 'o') {
+            bulletStyle = 'hollow';
+          } else if (/\\d+\\./.test(bulletChar)) {
+            bulletStyle = 'number';
+          } else if (totalIndent > 0) {
+            bulletStyle = 'hollow';
+          }
+          
+          // Extract content after bullet, preserving HTML
+          const bulletIndex = content.indexOf(bulletChar);
+          let bulletContent = '';
+          if (bulletIndex !== -1) {
+            bulletContent = content.substring(bulletIndex + bulletChar.length).trim();
+          } else {
+            bulletContent = match[2];
+          }
+          
+          console.log('  Bullet found:', bulletChar, 'content:', bulletContent.substring(0, 30));
+          processed.push({
+            type: 'bullet',
+            content: bulletContent,
+            indent: totalIndent,
+            bulletStyle
+          });
+        } else if (plainText) {
+          // Regular text content
+          console.log('  Text content:', content.substring(0, 30));
+          processed.push({
+            type: 'text',
+            content: content,
+            indent: totalIndent
+          });
+        }
       } else {
-        // Fallback to plain text extraction
-        bulletContent = match[2];
+        // For other elements, process children
+        Array.from(element.childNodes).forEach(child => processNode(child, totalIndent));
       }
-      
-      // Determine bullet style based on character and indent level
-      let bulletStyle: 'filled' | 'hollow' | 'number' = 'filled';
-      if (bulletChar === '○' || bulletChar === 'o') {
-        bulletStyle = 'hollow';
-      } else if (/\d+\./.test(bulletChar)) {
-        bulletStyle = 'number';
-      } else if (totalIndent > 0) {
-        // If indented, use hollow circles for sub-items
-        bulletStyle = 'hollow';
-      }
-      
-      processed.push({
-        type: 'bullet',
-        content: bulletContent.trim(),
-        indent: totalIndent,
-        bulletStyle
-      });
-    } else {
-      // Regular text with formatting preserved
-      processed.push({
-        type: 'text',
-        content: stripped,
-        indent: totalIndent
-      });
     }
   }
+  
+  // Process all top-level nodes
+  Array.from(temp.childNodes).forEach(node => processNode(node, 0));
+  
+  console.log('=== Processing complete ===');
+  console.log('Result:', processed);
   
   return processed;
 }
