@@ -4,6 +4,14 @@
 
 This feedback system allows users to rate the accuracy of AI-powered resume parsing and provides a mechanism for continuous improvement based on user feedback.
 
+## Architecture
+
+The feedback system consists of:
+- **Frontend**: Thumbs up/down buttons on each resume section
+- **Backend API**: `/make-server-bc1c5df9/feedback` endpoint
+- **Database**: `resume_feedback` table in Supabase
+- **Fallback Storage**: localStorage for offline or backup storage
+
 ## User Flow
 
 ### 1. Resume Parsing
@@ -11,23 +19,27 @@ When a user uploads their resume, the AI parsing engine extracts information int
 - Personal Details
 - Contact Information
 - Professional Summary
-- Employment History
-- Education
+- Employment History (with individual entries)
+- Education (with individual entries)
 - Skills
-- Links
+- Projects
+- Certifications
+- Awards
 - Custom Sections
 
 ### 2. Feedback Collection
 
-On each section editing screen, users see:
+Each section has feedback buttons at the bottom with the prompt:
 ```
 Help us improve AI. Parsed correctly?
 [👍] [👎]
 ```
 
+For sections with multiple items (Employment History and Education), each individual entry has its own feedback buttons.
+
 **Thumbs Up (👍)**
 - Indicates the parsing was accurate
-- Stored as positive feedback
+- Stored as positive feedback in Supabase
 - Confirms current parsing logic is working well
 - No additional input required
 
@@ -47,15 +59,46 @@ Help us improve AI. Parsed correctly?
 
 ### 3. Feedback Storage
 
-Feedback is stored in browser localStorage with this structure:
+Feedback is stored in the Supabase `resume_feedback` table with this structure:
 
+```sql
+CREATE TABLE resume_feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  section_id VARCHAR(255) NOT NULL,        -- e.g., "summary", "experience-123"
+  section_type VARCHAR(50) NOT NULL,       -- e.g., "summary", "experience"
+  is_positive BOOLEAN NOT NULL,
+  comment TEXT,                            -- User's feedback comment
+  parsed_content JSONB,                    -- The actual parsed data
+  original_text TEXT,                      -- Original text (optional)
+  user_id UUID,                            -- If user is authenticated
+  session_id VARCHAR(255),                 -- Anonymous session tracking
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+**Example stored data:**
 ```json
 {
-  "section": "contact",
-  "type": "negative",
-  "reason": "Email address was not detected correctly",
-  "timestamp": 1700000000000
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "section_id": "experience-abc123",
+  "section_type": "experience",
+  "is_positive": false,
+  "comment": "Job title was parsed incorrectly",
+  "parsed_content": {
+    "title": "Engineer Senior",
+    "company": "Tech Corp",
+    "dates": "2020-2023"
+  },
+  "user_id": null,
+  "session_id": "session-1700000000000-xyz789",
+  "created_at": "2025-11-24T10:30:00Z"
 }
+```
+
+**Fallback Storage:**
+Feedback is also stored in browser localStorage as a backup:
+```javascript
+localStorage.getItem('aiParsingFeedback')
 ```
 
 ## For Developers
@@ -63,13 +106,84 @@ Feedback is stored in browser localStorage with this structure:
 ### Files
 
 **Frontend:**
-- `/components/AIRewritePanel.tsx` - Main component with feedback UI
+- `/components/AIRewritePanel.tsx` - Main component with feedback UI and backend integration
 - `/utils/feedbackAnalyzer.ts` - Feedback analysis utilities
 - `/components/FeedbackViewer.tsx` - Admin view for feedback inspection
 - `/utils/api.tsx` - API client with parseResumeWithAI method
 
 **Backend:**
-- `/supabase/functions/server/index.tsx` - Server endpoint that accepts feedback guidance
+- `/supabase/functions/server/index.tsx` - Server with `/feedback` endpoint and parsing endpoint
+- Database table: `resume_feedback` in Supabase
+
+### Backend API Endpoint
+
+**POST `/make-server-bc1c5df9/feedback`**
+
+Stores user feedback about AI parsing accuracy in the database.
+
+**Request Body:**
+```json
+{
+  "section_id": "experience-abc123",      // Required: Unique section identifier
+  "section_type": "experience",           // Required: Base section type
+  "is_positive": false,                   // Required: true for thumbs up, false for thumbs down
+  "comment": "Job title parsed wrong",    // Optional: User's feedback text
+  "parsed_content": { ... },              // Optional: The actual parsed data for context
+  "original_text": "...",                 // Optional: Original resume text
+  "session_id": "session-xyz"             // Optional: Anonymous session identifier
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Feedback stored successfully",
+  "data": { ... }
+}
+```
+
+**Features:**
+- Automatically detects authenticated users and stores `user_id`
+- Accepts anonymous feedback via `session_id`
+- Stores complete parsed content for debugging
+- Returns detailed error messages on failure
+
+### Querying Feedback from Database
+
+To query feedback data from Supabase:
+
+```typescript
+// Get all feedback
+const { data, error } = await supabase
+  .from('resume_feedback')
+  .select('*')
+  .order('created_at', { ascending: false });
+
+// Get feedback by section type
+const { data, error } = await supabase
+  .from('resume_feedback')
+  .select('*')
+  .eq('section_type', 'experience');
+
+// Get negative feedback only
+const { data, error } = await supabase
+  .from('resume_feedback')
+  .select('*')
+  .eq('is_positive', false);
+
+// Get feedback with comments
+const { data, error } = await supabase
+  .from('resume_feedback')
+  .select('*')
+  .not('comment', 'is', null);
+
+// Get feedback statistics
+const { data, error } = await supabase
+  .from('resume_feedback')
+  .select('is_positive, count(*)')
+  .group('is_positive');
+```
 
 ### Using Feedback Data
 
@@ -162,30 +276,57 @@ This displays:
 
 ✅ **Completed:**
 - Feedback UI (thumbs up/down) on every section
+- Individual feedback buttons for each experience/education entry
 - Thumbs down dialog for collecting reasons
-- localStorage storage system
+- Supabase database integration with `resume_feedback` table
+- Backend `/feedback` endpoint for storing feedback
+- localStorage storage as backup/fallback
 - Feedback analyzer utility with statistics and common issues
 - Parsing guidance generation
 - Backend endpoint accepts feedback guidance
 - AI prompt injection of feedback guidance
 - FeedbackViewer admin component
 - Export/clear functionality
+- Session tracking for anonymous users
+- User ID tracking for authenticated users
+- Parsed content storage for debugging
 
 🔄 **Future Enhancements:**
-- Automatically use feedback guidance for all new resume uploads
+- Query feedback from database to improve AI prompts automatically
 - Machine learning to better categorize feedback reasons
 - Server-side feedback aggregation across all users
 - A/B testing of prompt improvements based on feedback
-- Feedback trends dashboard
+- Feedback trends dashboard with charts
 - Email notifications for high-priority issues
+- Admin panel to view database feedback with filters
+- Feedback analytics API endpoints
 
 ## Data Privacy
 
-- Feedback is stored locally in browser localStorage
-- No personal information from resumes is stored in feedback
-- Only section names and user-provided reasons are stored
-- Users can clear their feedback at any time
+**Database Storage:**
+- Feedback is stored in Supabase `resume_feedback` table
+- Stores section identifiers and user feedback comments
+- Parsed content is stored in JSONB format for debugging purposes
+- User ID is stored only if user is authenticated (optional)
+- Anonymous users are tracked via session ID
+
+**Local Storage:**
+- Feedback is also stored in browser localStorage as backup
+- Acts as fallback if backend is unavailable
+- Can be cleared by user at any time
+
+**Privacy Considerations:**
+- No personally identifiable resume content (names, emails, addresses) is required to be stored in feedback
+- Only structural parsing information and user comments are essential
+- Users can inspect stored data via browser dev tools
+- Session IDs allow tracking patterns without identifying users
+- Authenticated users' feedback is linked to their user_id for better support
+
+**Data Access:**
+- Only administrators can query the `resume_feedback` table
+- Users can view their own feedback via localStorage
 - Export functionality allows users to review their data
+- No feedback data is shared with third parties
 
 ## Testing
 
@@ -197,6 +338,41 @@ To test the feedback system:
 4. Enter a reason (e.g., "Email was not detected")
 5. Check localStorage: `localStorage.getItem('aiParsingFeedback')`
 6. Upload another resume to see if guidance is applied
+
+### Testing Database Integration
+
+**1. Submit Feedback:**
+- Upload a resume and navigate to any section
+- Click 👍 or 👎 on a section
+- For thumbs down, provide a comment
+
+**2. Verify Backend Logs:**
+- Check the browser console (F12) for:
+  - `✅ Feedback sent to backend successfully`
+  - Backend response from `/feedback` endpoint
+
+**3. Query Database:**
+- Go to your Supabase Dashboard
+- Navigate to Table Editor → `resume_feedback`
+- You should see your feedback entries with:
+  - `section_id` (e.g., "summary", "experience-abc123")
+  - `section_type` (e.g., "experience")
+  - `is_positive` (true/false)
+  - `comment` (if negative feedback)
+  - `parsed_content` (JSONB with the actual data)
+  - `session_id` (for anonymous users)
+  - `created_at` timestamp
+
+**4. Test Error Handling:**
+- Disable network in DevTools
+- Submit feedback
+- Verify it still saves to localStorage as fallback
+- Re-enable network and verify future submissions work
+
+**5. Test Session Tracking:**
+- Submit multiple feedback items
+- Check localStorage for `feedbackSessionId`
+- Verify all feedback from same session has same `session_id` in database
 
 **How to verify feedback is being used:**
 
@@ -217,9 +393,9 @@ When you upload a resume after providing feedback, you'll see:
    - Write: "Email address was not parsed correctly"
 
 2. **Check Feedback Storage:**
-   - Open browser console (F12)
-   - Run: `JSON.parse(localStorage.getItem('aiParsingFeedback'))`
-   - You should see your feedback stored
+   - **localStorage:** Run `JSON.parse(localStorage.getItem('aiParsingFeedback'))` in console
+   - **Database:** Query Supabase `resume_feedback` table
+   - You should see your feedback in both places
 
 3. **Second Resume Upload:**
    - Upload another resume

@@ -167,6 +167,37 @@ export class ApiClient {
 
     return data;
   }
+
+  // Feedback endpoints
+  async submitFeedback(feedbackData: {
+    section_id: string;
+    section_type: string;
+    is_positive: boolean;
+    comment?: string;
+    parsed_content?: any;
+    original_text?: string;
+    session_id?: string;
+  }) {
+    return this.request('/feedback', {
+      method: 'POST',
+      body: JSON.stringify(feedbackData),
+    });
+  }
+
+  async updateFeedback(feedbackId: string, feedbackData: {
+    section_id: string;
+    section_type: string;
+    is_positive: boolean;
+    comment?: string;
+    parsed_content?: any;
+    original_text?: string;
+    session_id?: string;
+  }) {
+    return this.request(`/feedback/${feedbackId}`, {
+      method: 'PUT',
+      body: JSON.stringify(feedbackData),
+    });
+  }
 }
 
 // Export singleton instance

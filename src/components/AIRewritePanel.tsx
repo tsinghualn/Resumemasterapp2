@@ -1001,13 +1001,141 @@ export function AIRewritePanel({
 
   // Track which section is being given feedback
   const [currentFeedbackSection, setCurrentFeedbackSection] = useState<string>('');
+  const [isUpdatingFeedback, setIsUpdatingFeedback] = useState<boolean>(false);
+
+  // Get or create feedback cache key for this session
+  const getFeedbackCacheKey = () => {
+    let sessionId = localStorage.getItem('feedbackSessionId');
+    if (!sessionId) {
+      sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('feedbackSessionId', sessionId);
+    }
+    return `feedbackCache_${sessionId}`;
+  };
+
+  // Get cached feedback for a section
+  const getCachedFeedback = (sectionId: string) => {
+    const cacheKey = getFeedbackCacheKey();
+    const cache = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+    return cache[sectionId] || null;
+  };
+
+  // Store feedback in cache
+  const cacheFeedback = (sectionId: string, feedbackData: any) => {
+    const cacheKey = getFeedbackCacheKey();
+    const cache = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+    cache[sectionId] = feedbackData;
+    localStorage.setItem(cacheKey, JSON.stringify(cache));
+  };
+
+  // Helper function to send feedback to backend
+  const sendFeedbackToBackend = async (
+    sectionId: string, 
+    isPositive: boolean, 
+    comment?: string
+  ) => {
+    try {
+      // Extract section type from section_id
+      // e.g., "experience-123" -> "experience", "summary" -> "summary"
+      const sectionType = sectionId.includes('-') 
+        ? sectionId.split('-')[0] 
+        : sectionId;
+
+      // Get parsed content for this section
+      let parsedContent = null;
+      if (sectionId === 'personalDetails') {
+        parsedContent = resumeData.personalDetails;
+      } else if (sectionId === 'contact') {
+        parsedContent = resumeData.contact;
+      } else if (sectionId === 'summary') {
+        parsedContent = { summary: resumeData.summary };
+      } else if (sectionId === 'skills') {
+        parsedContent = { skills: resumeData.skills };
+      } else if (sectionId.startsWith('experience-')) {
+        const expId = sectionId.replace('experience-', '');
+        parsedContent = resumeData.experience.find(exp => exp.id === expId);
+      } else if (sectionId.startsWith('education-')) {
+        const eduId = sectionId.replace('education-', '');
+        parsedContent = resumeData.education.find(edu => edu.id === eduId);
+      } else if (sectionId === 'projects') {
+        parsedContent = { projects: resumeData.projects };
+      } else if (sectionId === 'certifications') {
+        parsedContent = { certifications: resumeData.certifications };
+      } else if (sectionId === 'awards') {
+        parsedContent = { awards: resumeData.awards };
+      }
+
+      // Get or create session ID
+      let sessionId = localStorage.getItem('feedbackSessionId');
+      if (!sessionId) {
+        sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('feedbackSessionId', sessionId);
+      }
+
+      const feedbackData = {
+        section_id: sectionId,
+        section_type: sectionType,
+        is_positive: isPositive,
+        comment: comment || null,
+        parsed_content: parsedContent,
+        session_id: sessionId,
+      };
+
+      // Check if feedback already exists in cache (has dbId)
+      const cachedFeedback = getCachedFeedback(sectionId);
+      const existingDbId = cachedFeedback?.dbId;
+
+      let response;
+      
+      if (existingDbId) {
+        // UPDATE existing feedback
+        console.log('📝 Updating existing feedback in backend:', existingDbId, feedbackData);
+        response = await apiClient.updateFeedback(existingDbId, feedbackData);
+      } else {
+        // CREATE new feedback
+        console.log('📤 Creating new feedback in backend:', feedbackData);
+        response = await apiClient.submitFeedback(feedbackData);
+      }
+
+      console.log('📥 Backend response:', response);
+
+      if (!response.success) {
+        console.error('❌ Failed to save feedback to backend:', response.error);
+        toast.error('Failed to save feedback to database');
+        return false;
+      }
+
+      const actionVerb = existingDbId ? 'updated' : 'created';
+      console.log(`✅ Feedback ${actionVerb} successfully`);
+      
+      // Cache the feedback with the response data
+      cacheFeedback(sectionId, {
+        ...feedbackData,
+        timestamp: Date.now(),
+        dbId: existingDbId || response.data?.[0]?.id
+      });
+
+      return true;
+    } catch (error) {
+      console.error('❌ Error sending feedback to backend:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(`Failed to save feedback: ${errorMessage}`);
+      return false;
+    }
+  };
 
   // Feedback handling
-  const handleThumbsUp = (sectionId: string) => {
+  const handleThumbsUp = async (sectionId: string) => {
     setSectionFeedback(prev => ({ ...prev, [sectionId]: 'up' }));
-    toast.success('Thank you for your feedback!');
     
-    // Store positive feedback (keeps current prompt)
+    // Send to backend and cache
+    const success = await sendFeedbackToBackend(sectionId, true);
+    
+    if (success) {
+      toast.success('Thank you for your feedback!');
+    }
+    
+    // Store positive feedback in localStorage as backup
     const existingFeedback = JSON.parse(localStorage.getItem('aiParsingFeedback') || '[]');
     existingFeedback.push({
       section: sectionId,
@@ -1020,16 +1148,40 @@ export function AIRewritePanel({
   const handleThumbsDown = (sectionId: string) => {
     setSectionFeedback(prev => ({ ...prev, [sectionId]: 'down' }));
     setCurrentFeedbackSection(sectionId);
+    
+    // Check if there's existing feedback for this section
+    const cachedFeedback = getCachedFeedback(sectionId);
+    if (cachedFeedback && !cachedFeedback.is_positive) {
+      // User has already submitted negative feedback, load it
+      setFeedbackReason(cachedFeedback.comment || '');
+      setIsUpdatingFeedback(true);
+      toast.info('Loading your previous feedback for this section');
+    } else {
+      setFeedbackReason('');
+      setIsUpdatingFeedback(false);
+    }
+    
     setShowFeedbackDialog(true);
   };
 
-  const submitFeedback = () => {
+  const submitFeedback = async () => {
     if (!feedbackReason.trim()) {
       toast.error('Please provide a reason for your feedback');
       return;
     }
 
-    // Store negative feedback with reason
+    // Send to backend and cache
+    const success = await sendFeedbackToBackend(currentFeedbackSection, false, feedbackReason);
+
+    if (success) {
+      if (isUpdatingFeedback) {
+        toast.success('Your feedback has been updated!');
+      } else {
+        toast.success('Thank you for helping us improve!');
+      }
+    }
+
+    // Store negative feedback with reason in localStorage as backup
     const existingFeedback = JSON.parse(localStorage.getItem('aiParsingFeedback') || '[]');
     existingFeedback.push({
       section: currentFeedbackSection,
@@ -1039,10 +1191,10 @@ export function AIRewritePanel({
     });
     localStorage.setItem('aiParsingFeedback', JSON.stringify(existingFeedback));
 
-    toast.success('Thank you for helping us improve!');
     setShowFeedbackDialog(false);
     setFeedbackReason('');
     setCurrentFeedbackSection('');
+    setIsUpdatingFeedback(false);
   };
 
   // Finalize and go to next screen
@@ -2588,9 +2740,13 @@ export function AIRewritePanel({
       <Dialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Help Us Improve</DialogTitle>
+            <DialogTitle>
+              {isUpdatingFeedback ? 'Update Your Feedback' : 'Help Us Improve'}
+            </DialogTitle>
             <DialogDescription>
-              Please tell us what went wrong with the parsing so we can improve it.
+              {isUpdatingFeedback 
+                ? 'You can update your previous feedback for this section.' 
+                : 'Please tell us what went wrong with the parsing so we can improve it.'}
             </DialogDescription>
           </DialogHeader>
 

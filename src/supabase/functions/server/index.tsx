@@ -2105,4 +2105,164 @@ app.post("/make-server-bc1c5df9/upload-file", async (c) => {
   }
 });
 
+// ============= FEEDBACK ENDPOINTS =============
+
+// Submit NEW AI parsing feedback to resume_feedback table
+app.post("/make-server-bc1c5df9/feedback", async (c) => {
+  try {
+    const { 
+      section_id, 
+      section_type, 
+      is_positive, 
+      comment,
+      parsed_content,
+      original_text,
+      session_id 
+    } = await c.req.json();
+
+    if (!section_id || !section_type || typeof is_positive !== 'boolean') {
+      return c.json({ 
+        error: 'Missing required fields: section_id, section_type, is_positive' 
+      }, 400);
+    }
+
+    console.log(`📊 Creating NEW feedback: ${section_type} (${section_id}) - ${is_positive ? 'Positive' : 'Negative'}`);
+
+    // Optional: Check if user is authenticated
+    const authHeader = c.req.header('Authorization');
+    let user_id = null;
+    
+    if (authHeader) {
+      const { user } = await verifyUser(authHeader);
+      if (user) {
+        user_id = user.id;
+      }
+    }
+
+    // Insert feedback into resume_feedback table
+    const { data, error: insertError } = await supabase
+      .from('resume_feedback')
+      .insert({
+        section_id,
+        section_type,
+        is_positive,
+        comment: comment || null,
+        parsed_content: parsed_content || null,
+        original_text: original_text || null,
+        user_id,
+        session_id: session_id || null,
+      })
+      .select();
+
+    if (insertError) {
+      console.error('❌ Error inserting feedback:', insertError);
+      return c.json({ 
+        error: 'Failed to store feedback',
+        details: insertError.message 
+      }, 500);
+    }
+
+    console.log('✅ Feedback created successfully:', data);
+
+    return c.json({ 
+      success: true, 
+      message: 'Feedback stored successfully',
+      data 
+    });
+
+  } catch (error) {
+    console.error('❌ Error in feedback endpoint:', error);
+    return c.json({ 
+      error: 'Server error while storing feedback',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+// Update EXISTING AI parsing feedback
+app.put("/make-server-bc1c5df9/feedback/:id", async (c) => {
+  try {
+    const feedbackId = c.req.param('id');
+    const { 
+      section_id, 
+      section_type, 
+      is_positive, 
+      comment,
+      parsed_content,
+      original_text,
+      session_id 
+    } = await c.req.json();
+
+    if (!feedbackId) {
+      return c.json({ error: 'Feedback ID is required' }, 400);
+    }
+
+    if (!section_id || !section_type || typeof is_positive !== 'boolean') {
+      return c.json({ 
+        error: 'Missing required fields: section_id, section_type, is_positive' 
+      }, 400);
+    }
+
+    console.log(`📝 Updating feedback ${feedbackId}: ${section_type} (${section_id}) - ${is_positive ? 'Positive' : 'Negative'}`);
+
+    // Optional: Check if user is authenticated
+    const authHeader = c.req.header('Authorization');
+    let user_id = null;
+    
+    if (authHeader) {
+      const { user } = await verifyUser(authHeader);
+      if (user) {
+        user_id = user.id;
+      }
+    }
+
+    // Update feedback in resume_feedback table
+    const { data, error: updateError } = await supabase
+      .from('resume_feedback')
+      .update({
+        section_id,
+        section_type,
+        is_positive,
+        comment: comment || null,
+        parsed_content: parsed_content || null,
+        original_text: original_text || null,
+        user_id,
+        session_id: session_id || null,
+      })
+      .eq('id', feedbackId)
+      .select();
+
+    if (updateError) {
+      console.error('❌ Error updating feedback:', updateError);
+      return c.json({ 
+        error: 'Failed to update feedback',
+        details: updateError.message 
+      }, 500);
+    }
+
+    if (!data || data.length === 0) {
+      console.error('❌ Feedback not found:', feedbackId);
+      return c.json({ 
+        error: 'Feedback not found',
+        details: `No feedback record with id ${feedbackId}` 
+      }, 404);
+    }
+
+    console.log('✅ Feedback updated successfully:', data);
+
+    return c.json({ 
+      success: true, 
+      message: 'Feedback updated successfully',
+      data 
+    });
+
+  } catch (error) {
+    console.error('❌ Error in feedback update endpoint:', error);
+    return c.json({ 
+      error: 'Server error while updating feedback',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
 Deno.serve(app.fetch);
