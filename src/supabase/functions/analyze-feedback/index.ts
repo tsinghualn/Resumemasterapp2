@@ -137,6 +137,17 @@ app.post('/analyze-feedback-cron', async (c) => {
   try {
     console.log('🕐 Starting daily feedback analysis at', new Date().toISOString());
 
+    // Set running status flag for frontend to display "Updating" message
+    await supabase
+      .from('kv_store_bc1c5df9')
+      .upsert({
+        key: 'feedback_analysis_running',
+        value: {
+          is_running: true,
+          started_at: new Date().toISOString()
+        }
+      });
+
     // Get feedback from the last 24 hours
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -155,6 +166,18 @@ app.post('/analyze-feedback-cron', async (c) => {
 
     if (!feedbackData || feedbackData.length === 0) {
       console.log('ℹ️ No negative feedback in the last 24 hours');
+      
+      // Clear running status
+      await supabase
+        .from('kv_store_bc1c5df9')
+        .upsert({
+          key: 'feedback_analysis_running',
+          value: {
+            is_running: false,
+            completed_at: new Date().toISOString()
+          }
+        });
+      
       return c.json({ 
         success: true, 
         message: 'No negative feedback to analyze',
@@ -171,6 +194,18 @@ app.post('/analyze-feedback-cron', async (c) => {
 
     if (comments.length === 0) {
       console.log('ℹ️ No comments in negative feedback (all thumbs down without text)');
+      
+      // Clear running status
+      await supabase
+        .from('kv_store_bc1c5df9')
+        .upsert({
+          key: 'feedback_analysis_running',
+          value: {
+            is_running: false,
+            completed_at: new Date().toISOString()
+          }
+        });
+      
       return c.json({ 
         success: true, 
         message: 'No comments to analyze',
@@ -232,6 +267,17 @@ app.post('/analyze-feedback-cron', async (c) => {
 
     console.log('💾 Analysis stored with ID:', analysisId);
 
+    // Clear running status flag (analysis complete)
+    await supabase
+      .from('kv_store_bc1c5df9')
+      .upsert({
+        key: 'feedback_analysis_running',
+        value: {
+          is_running: false,
+          completed_at: new Date().toISOString()
+        }
+      });
+
     // Return the analysis
     return c.json({
       success: true,
@@ -244,6 +290,20 @@ app.post('/analyze-feedback-cron', async (c) => {
 
   } catch (error) {
     console.error('❌ Error in feedback analysis cron:', error);
+    
+    // Clear running status flag even on error
+    await supabase
+      .from('kv_store_bc1c5df9')
+      .upsert({
+        key: 'feedback_analysis_running',
+        value: {
+          is_running: false,
+          error: true,
+          error_message: error instanceof Error ? error.message : 'Unknown error',
+          completed_at: new Date().toISOString()
+        }
+      });
+    
     return c.json({
       error: 'Failed to analyze feedback',
       details: error instanceof Error ? error.message : 'Unknown error'
@@ -266,6 +326,26 @@ app.get('/analyze-feedback-now', async (c) => {
 // Health check
 app.get('/health', (c) => {
   return c.json({ status: 'ok', service: 'feedback-analyzer' });
+});
+
+// Get current running status (for frontend to poll)
+app.get('/status', async (c) => {
+  try {
+    const { data, error } = await supabase
+      .from('kv_store_bc1c5df9')
+      .select('value')
+      .eq('key', 'feedback_analysis_running')
+      .single();
+    
+    if (error || !data) {
+      return c.json({ is_running: false });
+    }
+    
+    return c.json(data.value);
+  } catch (error) {
+    console.error('Error fetching status:', error);
+    return c.json({ is_running: false });
+  }
 });
 
 Deno.serve(app.fetch);

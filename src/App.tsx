@@ -1,20 +1,6 @@
-import { useState, useEffect } from 'react';
-import { LandingPage } from './components/LandingPage';
-import { AuthDialog } from './components/AuthDialog';
-import { EmailVerificationInfo } from './components/EmailVerificationInfo';
-import { ProgressSteps } from './components/ProgressSteps';
-import { ResumeUploader } from './components/ResumeUploader';
-import { JobDescriptionScreen } from './components/JobDescriptionScreen';
-import { AIRewritePanel } from './components/AIRewritePanel';
-import { JobMatchScore } from './components/JobMatchScore';
-import { ResumePreview } from './components/ResumePreview';
-import { Dashboard } from './components/Dashboard';
-import { SystemStatus } from './components/SystemStatus';
-import { AITestPanel } from './components/AITestPanel';
-import { Button } from './components/ui/button';
-import { FileText, LogOut, Home, Settings } from 'lucide-react';
 import { createClient } from './utils/supabase/client';
 import { apiClient } from './utils/api';
+import { projectId } from './utils/supabase/info.tsx';
 import { toast } from 'sonner@2.0.3';
 import {
   Dialog,
@@ -80,6 +66,7 @@ export default function App() {
   const [showEmailVerification, setShowEmailVerification] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState('');
   const [parseResumeDialogOpen, setParseResumeDialogOpen] = useState(false);
+  const [isFeedbackAnalysisRunning, setIsFeedbackAnalysisRunning] = useState(false);
   
   const [resumeContent, setResumeContent] = useState<string>('');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -101,6 +88,34 @@ export default function App() {
   useEffect(() => {
     checkSession();
   }, []);
+
+  // Poll for feedback analysis status (only for non-authenticated users)
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Don't poll if user is authenticated
+      setIsFeedbackAnalysisRunning(false);
+      return;
+    }
+
+    const checkFeedbackStatus = async () => {
+      try {
+        const response = await fetch(`https://${projectId}.supabase.co/functions/v1/analyze-feedback/status`);
+        const data = await response.json();
+        setIsFeedbackAnalysisRunning(data.is_running || false);
+      } catch (error) {
+        console.error('Error checking feedback status:', error);
+        setIsFeedbackAnalysisRunning(false);
+      }
+    };
+
+    // Check immediately
+    checkFeedbackStatus();
+
+    // Poll every 10 seconds
+    const intervalId = setInterval(checkFeedbackStatus, 10000);
+
+    return () => clearInterval(intervalId);
+  }, [isAuthenticated]);
 
   const checkSession = async () => {
     try {
@@ -730,6 +745,7 @@ CERTIFICATIONS
           isAuthenticated={isAuthenticated}
           email={currentUser?.email}
           onSignOut={handleSignOut}
+          isUpdating={isFeedbackAnalysisRunning}
         />
         <AuthDialog
           open={authDialogOpen}

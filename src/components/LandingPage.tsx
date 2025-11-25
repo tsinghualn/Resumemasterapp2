@@ -1,5 +1,5 @@
 import { Button } from './ui/button';
-import { FileText, Sparkles, Zap, Shield, TrendingUp, LayoutDashboard, User } from 'lucide-react';
+import { FileText, Sparkles, Zap, Shield, TrendingUp, LayoutDashboard, User, Loader2 } from 'lucide-react';
 
 interface LandingPageProps {
   onGetStarted: (mode: 'upload' | 'scratch') => void;
@@ -9,6 +9,7 @@ interface LandingPageProps {
   isAuthenticated?: boolean;
   email?: string;
   onSignOut?: () => void;
+  isUpdating?: boolean; // New prop for feedback analysis status
 }
 
 export function LandingPage({ 
@@ -18,7 +19,8 @@ export function LandingPage({
   onDashboard,
   isAuthenticated = false,
   email,
-  onSignOut
+  onSignOut,
+  isUpdating = false
 }: LandingPageProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -49,6 +51,13 @@ export function LandingPage({
               </>
             ) : (
               <>
+                {/* Show "Updating" message only for non-authenticated users */}
+                {isUpdating && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg mr-2">
+                    <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                    <span className="text-sm text-blue-700">Updating...</span>
+                  </div>
+                )}
                 <Button onClick={onSignIn} variant="ghost">
                   Sign In
                 </Button>

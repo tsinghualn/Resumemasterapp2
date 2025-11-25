@@ -1,11 +1,11 @@
 /**
  * Cron job configuration for daily feedback analysis
- * Runs at 6:00 PM PST (2:00 AM UTC next day)
+ * Runs at 10:00 PM PST (6:00 AM UTC next day)
  * 
- * PST is UTC-8, so 6 PM PST = 2 AM UTC next day
- * During PDT (daylight saving), it's UTC-7, so 6 PM PDT = 1 AM UTC next day
+ * PST is UTC-8, so 10 PM PST = 6 AM UTC next day
+ * During PDT (daylight saving), it's UTC-7, so 10 PM PDT = 5 AM UTC next day
  * 
- * Using cron expression: 0 2 * * * (2 AM UTC daily)
+ * Using cron expression: 0 6 * * * (6 AM UTC daily)
  * 
  * Note: Supabase cron jobs use UTC timezone
  */
