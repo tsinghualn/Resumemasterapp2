@@ -67,7 +67,7 @@ export function RichTextEditor({
     isUpdatingRef.current = true;
     
     try {
-      // For indent/outdent commands, ensure we're working within a list context
+      // For indent/outdent commands
       if (command === 'indent' || command === 'outdent') {
         const range = selection.getRangeAt(0);
         const container = range.commonAncestorContainer;
@@ -77,44 +77,10 @@ export function RichTextEditor({
         
         // Check if we're inside a list item
         const listItem = parentElement?.closest('li');
-        
-        if (command === 'indent' && !listItem) {
-          // If not in a list, create one first before indenting
-          console.log('Not in list, creating list first...');
-          document.execCommand('insertUnorderedList', false);
-          
-          // Wait for list to be created, then indent
-          setTimeout(() => {
-            console.log('List created, now indenting...');
-            const success = document.execCommand('indent', false);
-            console.log('Indent command result:', success);
-            
-            // Wait for indent to complete, then capture content
-            setTimeout(() => {
-              if (editorRef.current) {
-                const content = editorRef.current.innerHTML;
-                console.log('After indent, captured content:', content);
-                
-                // Verify content is not empty
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = content;
-                const textContent = tempDiv.textContent || '';
-                
-                if (textContent.trim()) {
-                  console.log('Content verified, calling onChange');
-                  onChange(content);
-                } else {
-                  console.error('ERROR: Content is empty after indent!');
-                  console.error('Editor innerHTML:', editorRef.current.innerHTML);
-                  console.error('Editor outerHTML:', editorRef.current.outerHTML);
-                }
-              }
-              isUpdatingRef.current = false;
-            }, 100); // Increased delay for better reliability
-          }, 50);
-          return; // Exit early since we're handling async
-        }
-        // Allow outdent - browser will handle it appropriately
+        console.log('Indent/Outdent command:', command, 'In list:', !!listItem);
+    
+        // Allow indent regardless of list context - browser will handle it
+        // (creates blockquote for non-list text, nested list for list items)
       }
       
       // Execute command
