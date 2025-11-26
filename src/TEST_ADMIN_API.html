@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Admin API</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        button { padding: 10px 20px; margin: 10px 0; background: #007acc; color: white; border: none; cursor: pointer; }
+        button:hover { background: #005a9e; }
+        pre { background: #252526; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+        .warning { color: #dcdcaa; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Admin Role Debugging Tool</h1>
+    
+    <h2>Step 1: Check Database Role</h2>
+    <p>First, verify your role in Supabase SQL Editor:</p>
+    <pre>SELECT email, role FROM users WHERE email = 'tsinghualn@gmail.com';</pre>
+    <p>Expected: <span class="success">role = 'admin'</span></p>
+    <p>If not, run: <code>UPDATE users SET role = 'admin' WHERE email = 'tsinghualn@gmail.com';</code></p>
+    
+    <hr>
+    
+    <h2>Step 2: Test Backend API</h2>
+    <button onclick="testAPI()">Click to Test /auth/me Endpoint</button>
+    
+    <div id="result"></div>
+    
+    <hr>
+    
+    <h2>Step 3: Check Current User Object</h2>
+    <button onclick="checkCurrentUser()">Click to Check currentUser in App</button>
+    
+    <div id="userResult"></div>
+
+    <script>
+        async function testAPI() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<p class="warning">Testing API...</p>';
+            
+            try {
+                // Make request to the backend endpoint
+                const response = await fetch('http://localhost:3000/make-server-bc1c5df9/auth/me', {
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                let html = '<h3>API Response:</h3>';
+                html += '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+                
+                // Check for role field
+                if (data.role) {
+                    if (data.role === 'admin') {
+                        html += '<p class="success">✅ SUCCESS! Role is: <strong>admin</strong></p>';
+                        html += '<p>The backend is working correctly!</p>';
+                        html += '<p class="warning">If you still don\'t see the badge, sign out and sign in again.</p>';
+                    } else {
+                        html += '<p class="error">❌ Role is: <strong>' + data.role + '</strong> (should be "admin")</p>';
+                        html += '<p>Run this in Supabase SQL Editor:</p>';
+                        html += '<pre>UPDATE users SET role = \'admin\' WHERE email = \'tsinghualn@gmail.com\';</pre>';
+                    }
+                } else if (data.user && data.user.role) {
+                    // Role might be nested in user object
+                    html += '<p class="warning">⚠️ Role found in user object: <strong>' + data.user.role + '</strong></p>';
+                    html += '<p>This is the Supabase Auth role, not your database role.</p>';
+                    html += '<p class="error">Backend is NOT returning database role!</p>';
+                } else {
+                    html += '<p class="error">❌ No role field found in response!</p>';
+                    html += '<p>Backend is not returning the database role.</p>';
+                    html += '<p>Make sure you restarted the dev server after code changes.</p>';
+                }
+                
+                resultDiv.innerHTML = html;
+                
+            } catch (error) {
+                resultDiv.innerHTML = '<p class="error">❌ Error: ' + error.message + '</p>' +
+                    '<p>Make sure you are logged in and the dev server is running.</p>';
+            }
+        }
+        
+        function checkCurrentUser() {
+            const userDiv = document.getElementById('userResult');
+            
+            try {
+                // This will only work if opened from the main app
+                if (window.opener) {
+                    const currentUser = window.opener.currentUser;
+                    let html = '<h3>Current User Object:</h3>';
+                    html += '<pre>' + JSON.stringify(currentUser, null, 2) + '</pre>';
+                    
+                    if (currentUser && currentUser.role) {
+                        if (currentUser.role === 'admin') {
+                            html += '<p class="success">✅ currentUser.role = admin</p>';
+                        } else {
+                            html += '<p class="error">❌ currentUser.role = ' + currentUser.role + '</p>';
+                        }
+                    } else {
+                        html += '<p class="error">❌ No role property in currentUser!</p>';
+                    }
+                    
+                    userDiv.innerHTML = html;
+                } else {
+                    userDiv.innerHTML = '<p class="warning">This page must be opened from the main app.</p>' +
+                        '<p>Or open browser console (F12) on the main app and type:</p>' +
+                        '<pre>console.log(\'currentUser:\', window.currentUser || \'not found\');</pre>';
+                }
+            } catch (error) {
+                userDiv.innerHTML = '<p class="error">Error: ' + error.message + '</p>';
+            }
+        }
+    </script>
+</body>
+</html>
+
+

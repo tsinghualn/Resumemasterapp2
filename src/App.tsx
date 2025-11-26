@@ -3,6 +3,7 @@ import { createClient } from './utils/supabase/client';
 import { apiClient } from './utils/api';
 import { projectId } from './utils/supabase/info.tsx';
 import { toast } from 'sonner@2.0.3';
+import { isAdminUser } from './utils/adminConfig';
 import { FileText, Home, LogOut, Settings } from 'lucide-react';
 import { Button } from './components/ui/button';
 import {
@@ -103,18 +104,32 @@ export default function App() {
     checkSession();
   }, []);
 
-  // Poll for feedback analysis status (only for non-authenticated users)
+  // Determine if current user is admin (checks role from database)
+  const isAdmin = isAdminUser(currentUser);
+  
+  // Debug logging for admin detection
   useEffect(() => {
-    if (isAuthenticated) {
-      // Don't poll if user is authenticated
+    console.log('🔍 Admin check running...');
+    console.log('currentUser:', currentUser);
+    console.log('currentUser.role:', currentUser?.role);
+    console.log('isAdmin result:', isAdmin);
+  }, [currentUser, isAdmin]);
+
+  // Poll for feedback analysis status (ONLY for admin users)
+  useEffect(() => {
+    if (!isAdmin) {
+      // Don't poll if user is NOT admin
       setIsFeedbackAnalysisRunning(false);
       return;
     }
+
+    console.log('🔍 Admin detected - polling for feedback analysis status');
 
     const checkFeedbackStatus = async () => {
       try {
         const response = await fetch(`https://${projectId}.supabase.co/functions/v1/analyze-feedback/status`);
         const data = await response.json();
+        console.log('📊 Feedback analysis status:', data);
         setIsFeedbackAnalysisRunning(data.is_running || false);
       } catch (error) {
         console.error('Error checking feedback status:', error);
@@ -129,7 +144,7 @@ export default function App() {
     const intervalId = setInterval(checkFeedbackStatus, 10000);
 
     return () => clearInterval(intervalId);
-  }, [isAuthenticated]);
+  }, [isAdmin]);
 
   const checkSession = async () => {
     try {
@@ -140,20 +155,67 @@ export default function App() {
         apiClient.setAccessToken(session.access_token);
         setIsAuthenticated(true);
         
-        // Fetch user profile with username
+        // Fetch user profile with username and role
         try {
+          console.log('🔍 Fetching user profile...');
+          console.log('Session user ID:', session.user.id);
+          console.log('Session user email:', session.user.email);
+          
           const userProfile = await apiClient.getMe();
-          console.log('User profile:', userProfile);
+          console.log('User profile from API:', userProfile);
+          
+          // Fetch role directly from database (backend not updated yet)
+          console.log('🔍 Fetching role from database...');
+          console.log('Looking up user with ID:', session.user.id);
+          console.log('Looking up user with email:', session.user.email);
+          
+          const supabase = createClient();
+          
+          // Query database for role only (username column may not exist)
+          const { data: dbUser, error: dbError } = await supabase
+            .from('users')
+            .select('role')
+            .eq('id', session.user.id)
+            .single();
+          
+          console.log('Database query returned:');
+          console.log('  - data:', dbUser);
+          console.log('  - error:', dbError);
+          
+          if (dbError) {
+            console.error('❌ Database error:', dbError);
+          } else {
+            console.log('✅ User from database:', dbUser);
+          }
+          
+          const finalRole = dbUser?.role || 'user';
+          const finalUsername = userProfile.username || session.user.email?.split('@')[0];
+          
+          console.log('📊 Setting currentUser with:');
+          console.log('  - username:', finalUsername);
+          console.log('  - role:', finalRole);
+          
           setCurrentUser({
             ...session.user,
-            username: userProfile.username || session.user.email?.split('@')[0]
+            username: finalUsername,
+            role: finalRole
           });
+          
+          console.log('✅ Current user set successfully!');
+          console.log('🎯 Role is:', finalRole);
+          
+          if (finalRole === 'admin') {
+            console.log('🎉 ADMIN USER DETECTED!');
+          } else {
+            console.log('⚠️ User is NOT admin, role is:', finalRole);
+          }
         } catch (profileError) {
-          console.error('Error fetching user profile:', profileError);
-          // Fallback to just the session user
+          console.error('❌ Error fetching user profile:', profileError);
+          // Fallback to just the session user with default role
           setCurrentUser({
             ...session.user,
-            username: session.user.email?.split('@')[0]
+            username: session.user.email?.split('@')[0],
+            role: 'user'  // Default role
           });
         }
       }
@@ -760,6 +822,7 @@ CERTIFICATIONS
           email={currentUser?.email}
           onSignOut={handleSignOut}
           isUpdating={isFeedbackAnalysisRunning}
+          isAdmin={isAdmin}
         />
         <AuthDialog
           open={authDialogOpen}

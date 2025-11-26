@@ -9,7 +9,8 @@ interface LandingPageProps {
   isAuthenticated?: boolean;
   email?: string;
   onSignOut?: () => void;
-  isUpdating?: boolean; // New prop for feedback analysis status
+  isUpdating?: boolean; // Feedback analysis status
+  isAdmin?: boolean; // Admin user flag
 }
 
 export function LandingPage({ 
@@ -20,7 +21,8 @@ export function LandingPage({
   isAuthenticated = false,
   email,
   onSignOut,
-  isUpdating = false
+  isUpdating = false,
+  isAdmin = false
 }: LandingPageProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -37,13 +39,23 @@ export function LandingPage({
           <div className="flex items-center gap-3">
             {isAuthenticated ? (
               <>
+                {/* Show "Updating" message ONLY for admin users when analysis is running */}
+                {isAdmin && isUpdating && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg mr-3 shadow-sm">
+                    <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />
+                    <span className="text-sm text-amber-800 font-medium">AI Analysis Running...</span>
+                  </div>
+                )}
                 <Button onClick={onDashboard} variant="outline">
                   <LayoutDashboard className="w-4 h-4 mr-2" />
                   Dashboard
                 </Button>
                 <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
                   <User className="w-4 h-4 text-blue-600" />
-                  <span className="font-medium text-gray-700">{email}</span>
+                  <span className="font-medium text-gray-700">
+                    {email}
+                    {isAdmin && <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">Admin</span>}
+                  </span>
                 </div>
                 <Button onClick={onSignOut} variant="ghost">
                   Sign Out
@@ -51,13 +63,6 @@ export function LandingPage({
               </>
             ) : (
               <>
-                {/* Show "Updating" message only for non-authenticated users */}
-                {isUpdating && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg mr-2">
-                    <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
-                    <span className="text-sm text-blue-700">Updating...</span>
-                  </div>
-                )}
                 <Button onClick={onSignIn} variant="ghost">
                   Sign In
                 </Button>

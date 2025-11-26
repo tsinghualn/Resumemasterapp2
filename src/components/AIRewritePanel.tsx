@@ -69,7 +69,9 @@ import {
   GripVertical,
   X,
   Info,
-  Pencil
+  Pencil,
+  PanelRightClose,
+  PanelRightOpen
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { apiClient } from '../utils/api';
@@ -171,6 +173,7 @@ export function AIRewritePanel({
   const [showReorderDialog, setShowReorderDialog] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [highlightSettings, setHighlightSettings] = useState(false);
+  const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   
   // Refs for scrolling to settings
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -1341,7 +1344,7 @@ export function AIRewritePanel({
           ref={settingsRef}
           className="bg-white border-b shadow-sm p-6"
         >
-          <div className="max-w-7xl mx-auto">
+          <div className="w-4/5 mx-auto">
             {/* Header */}
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">
@@ -1441,15 +1444,17 @@ export function AIRewritePanel({
         </div>
       )}
 
-      {/* Review Note */}
-      <div className="px-6 py-3 flex items-center gap-2 text-blue-600">
-        <FileText className="w-4 h-4" />
-        <span className="text-sm">Review and edit each section of your resume. Make sure all information is accurate before proceeding to optimization.</span>
-      </div>
+      {/* Main content container with consistent padding - 80% width */}
+      <div className="w-4/5 mx-auto px-4">
+        {/* Review Note */}
+        <div className="py-3 flex items-center gap-2 text-blue-600">
+          <FileText className="w-4 h-4" />
+          <span className="text-sm">Review and edit each section of your resume. Make sure all information is accurate before proceeding to optimization.</span>
+        </div>
 
-      <div className="flex h-[calc(100vh-80px)]">
-        {/* Left Sidebar Navigation */}
-        <div className="w-72 bg-white border-r">
+        <div className="flex h-[calc(100vh-80px)]">
+        {/* Left Sidebar Navigation - 1/6 of width */}
+        <div className="flex-1 bg-white border-r">
           <ScrollArea className="h-full">
             <div className="p-4 space-y-1">
               {getNavigationItems().map((item) => {
@@ -1562,9 +1567,31 @@ export function AIRewritePanel({
           </ScrollArea>
         </div>
 
-        {/* Center - Editing Area */}
-        <div className="flex-1 overflow-auto">
-          <div className="max-w-3xl mx-auto p-8">
+        {/* Center - Editing Area - 3/6 of width */}
+        <div className={`${isPreviewVisible ? "flex-[3]" : "flex-[5]"} overflow-auto`}>
+          <div className="px-8 pt-4 pb-8 max-w-none">
+            {/* Toggle Preview Button */}
+            <div className="flex justify-end mb-4">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setIsPreviewVisible(!isPreviewVisible)}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-md"
+              >
+                {isPreviewVisible ? (
+                  <>
+                    <PanelRightClose className="w-4 h-4" />
+                    Hide Preview
+                  </>
+                ) : (
+                  <>
+                    <PanelRightOpen className="w-4 h-4" />
+                    Show Preview
+                  </>
+                )}
+              </Button>
+            </div>
+            
             <Card className="p-8">
               {/* Personal Details Section */}
               {currentSection === 'personalDetails' && (
@@ -2316,8 +2343,9 @@ export function AIRewritePanel({
           </div>
         </div>
 
-        {/* Right - Live Preview */}
-        <div className="w-[500px] bg-gray-50 border-l overflow-auto">
+        {/* Right - Live Preview - 2/6 of width */}
+        {isPreviewVisible && (
+        <div className="flex-[2] bg-gray-50 border-l overflow-auto">
           <div className="sticky top-0 bg-white border-b p-4 flex items-center justify-between z-10">
             <div className="flex items-center gap-2">
               <Save className="w-4 h-4 text-green-600" />
@@ -2683,7 +2711,9 @@ export function AIRewritePanel({
             </div>
           </div>
         </div>
+        )}
       </div>
+      </div> {/* End w-4/5 mx-auto container (80% width) */}
 
       {/* Reorder Dialog */}
       <Dialog open={showReorderDialog} onOpenChange={setShowReorderDialog}>

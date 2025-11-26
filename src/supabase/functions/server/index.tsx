@@ -1222,7 +1222,7 @@ app.get("/make-server-bc1c5df9/auth/list-users", async (c) => {
   }
 });
 
-// Get current user info
+// Get current user info (including role from database)
 app.get("/make-server-bc1c5df9/auth/me", async (c) => {
   const { error, user } = await verifyUser(c.req.header('Authorization'));
   
@@ -1230,7 +1230,30 @@ app.get("/make-server-bc1c5df9/auth/me", async (c) => {
     return c.json({ error: error || 'Unauthorized' }, 401);
   }
 
-  return c.json({ user });
+  // Fetch additional user data from database including role
+  try {
+    const { data: userProfile, error: dbError } = await supabase
+      .from('users')
+      .select('username, role')
+      .eq('id', user.id)
+      .maybeSingle();
+    
+    if (userProfile) {
+      // Merge database fields with auth user data
+      return c.json({ 
+        ...user,
+        username: userProfile.username,
+        role: userProfile.role || 'user'  // Default to 'user' if no role set
+      });
+    }
+    
+    // If no database record, return auth user with default role
+    return c.json({ ...user, role: 'user' });
+  } catch (dbError) {
+    console.error('Error fetching user profile:', dbError);
+    // Return auth user with default role on error
+    return c.json({ ...user, role: 'user' });
+  }
 });
 
 // Reset password
