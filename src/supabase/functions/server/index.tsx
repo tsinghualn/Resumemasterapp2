@@ -2110,6 +2110,144 @@ Your task is to improve the content using strong action verbs, quantifying achie
   }
 });
 
+// Generate professional summary from resume content
+app.post("/make-server-bc1c5df9/generate-summary", async (c) => {
+  try {
+    console.log('✨ Generate-summary endpoint called');
+    const { resumeContext, industryTone, rewriteStyle, jobDescription } = await c.req.json();
+
+    if (!resumeContext) {
+      return c.json({ error: 'Resume context is required' }, 400);
+    }
+
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    
+    if (!openaiKey) {
+      return c.json({ 
+        error: 'OpenAI API key not configured. Please add your OPENAI_API_KEY in the environment variables.' 
+      }, 500);
+    }
+    
+    if (!openaiKey.startsWith('sk-')) {
+      return c.json({ 
+        error: 'OpenAI API key appears invalid. Please check your OPENAI_API_KEY value.' 
+      }, 500);
+    }
+    
+    console.log(`Generating professional summary with tone: ${industryTone}, style: ${rewriteStyle}`);
+
+    // Build dynamic prompt based on tone and style
+    const toneInstructions = {
+      none: 'Use natural, professional language without any specific tone emphasis.',
+      professional: 'Use professional and formal language. Focus on industry-standard terminology.',
+      creative: 'Use creative and dynamic language. Be innovative with word choice while staying professional.',
+      technical: 'Use technical and precise language. Include specific technical terms and methodologies.',
+      executive: 'Use executive and strategic language. Focus on leadership and high-level business outcomes.'
+    };
+
+    const styleInstructions = {
+      none: 'Maintain a natural writing style.',
+      concise: 'Keep the content concise and brief. Create a tight, impactful summary.',
+      detailed: 'Provide detailed and comprehensive overview of qualifications.',
+      balanced: 'Balance detail with brevity. Aim for 3-4 sentences.',
+      achievement: 'Focus heavily on achievements and measurable results.'
+    };
+
+    const toneGuidance = toneInstructions[industryTone as keyof typeof toneInstructions] || toneInstructions.none;
+    const styleGuidance = styleInstructions[rewriteStyle as keyof typeof styleInstructions] || styleInstructions.none;
+
+    const systemPrompt = `You are an expert resume writer specializing in creating compelling professional summaries.
+
+TONE: ${toneGuidance}
+
+STYLE: ${styleGuidance}
+
+TASK: Generate a professional summary based on the provided resume information.
+
+CRITICAL INSTRUCTIONS:
+- Return ONLY the professional summary text itself
+- Do NOT include phrases like "Here's the summary" or "Professional Summary:" as a header
+- Do NOT include any commentary, explanations, or meta-text
+- Simply provide the summary paragraph that can be directly used
+- Write in first person perspective (e.g., "Experienced professional with..." not "They are...")
+- Make it compelling and highlight key strengths and value proposition
+- Keep it between 3-5 sentences unless the style requires otherwise
+${jobDescription ? '- Tailor the summary to align with the job description keywords and requirements' : ''}
+
+Your task is to craft a professional summary that captures the candidate's value proposition using strong, impactful language.`;
+
+    const userPrompt = jobDescription 
+      ? `Resume Information:\n${resumeContext}\n\nJob Description:\n${jobDescription}\n\nGenerate a professional summary that highlights how this candidate's background aligns with the job requirements.`
+      : `Resume Information:\n${resumeContext}\n\nGenerate a compelling professional summary based on this resume.`;
+
+    // Call OpenAI API
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        temperature: 0.8,
+        max_tokens: 500
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('OpenAI API error:', errorData);
+      
+      if (errorData.error?.code === 'insufficient_quota') {
+        return c.json({
+          error: 'OpenAI API quota exceeded',
+          details: 'Please add credits at https://platform.openai.com/settings/organization/billing',
+          errorCode: 'OPENAI_QUOTA_EXCEEDED'
+        }, 402);
+      }
+      
+      return c.json({ error: `AI summary generation failed: ${errorData.error?.message || 'Unknown error'}` }, 500);
+    }
+
+    const data = await response.json();
+    let summary = data.choices[0]?.message?.content || '';
+    
+    // Clean up any unwanted phrases
+    const unwantedPhrases = [
+      /^Here'?s? (the |a )?professional summary:?\\s*/i,
+      /^Professional Summary:?\\s*/i,
+      /^Summary:?\\s*/i,
+      /^\\*\\*Professional Summary.*?\\*\\*:?\\s*/i,
+    ];
+    
+    for (const phrase of unwantedPhrases) {
+      summary = summary.replace(phrase, '');
+    }
+    
+    summary = summary.trim();
+    
+    console.log('✅ Professional summary generated successfully');
+
+    return c.json({ 
+      success: true,
+      summary
+    });
+  } catch (error) {
+    console.error('Error generating summary:', error);
+    return c.json({ error: `Summary generation failed: ${error.message}` }, 500);
+  }
+});
+
 // Analyze job match score (no auth required - public feature)
 app.post("/make-server-bc1c5df9/analyze-match", async (c) => {
   try {

@@ -400,12 +400,13 @@ SKILLS
       }
       
       // Update state and navigate immediately for better UX
-      console.log('✅ State updated, navigating to job description screen...');
+      console.log('✅ State updated, navigating to AI Resume optimization screen...');
       setResumeContent(content);
       setUploadedFileName(fileName);
-      
-      // Navigate directly to job description - skip parsed screen
-      setCurrentScreen('jobdesc');
+
+      // Navigate directly to AI Resume optimization - skip parsed screen
+      setCurrentScreen('optimize');
+      setOptimizationFlow('direct');
       console.log('🎯 Navigation complete - screen set to: jobdesc');
     } else {
       console.log('❌ No content provided, skipping navigation');

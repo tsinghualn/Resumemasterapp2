@@ -11,6 +11,27 @@ export interface Education {
   current: boolean;
 }
 
+/**
+ * Converts markdown-style bold (**text**) to HTML bold (<strong>text</strong>)
+ */
+function convertMarkdownToHTML(text: string): string {
+  if (!text) return text;
+  
+  // Convert **text** to <strong>text</strong> (bold)
+  let result = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  
+  // Convert __text__ to <strong>text</strong> (bold alternative)
+  result = result.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  
+  // Convert *text* to <em>text</em> (italic) - but not if it's part of **
+  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+  
+  // Convert _text_ to <em>text</em> (italic alternative)
+  result = result.replace(/(?<!_)_([^_]+)_(?!_)/g, '<em>$1</em>');
+  
+  return result;
+}
+
 // Helper function to parse dates in various formats
 function parseDate(dateStr: string): { start: string; end: string; current: boolean } {
   if (!dateStr) return { start: '', end: '', current: false };
@@ -165,7 +186,8 @@ export function parseEducation(text: string): Education[] {
           location: '',
           startDate: '',
           endDate: '',
-          details: details || '',
+          // Convert markdown to HTML for proper display
+          details: convertMarkdownToHTML(details) || '',
           current: false
         });
       }
@@ -306,7 +328,8 @@ export function parseEducation(text: string): Education[] {
         location: location || '',
         startDate: startDate || '',
         endDate: endDate || '',
-        details: details || '',
+        // Convert markdown to HTML for proper display
+        details: convertMarkdownToHTML(details) || '',
         current
       });
     }

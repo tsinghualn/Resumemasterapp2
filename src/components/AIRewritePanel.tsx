@@ -36,7 +36,7 @@ import { parseEducation } from '../utils/educationParser';
 import { RichTextEditor } from './RichTextEditor';
 import { AIImproveDialog } from './AIImproveDialog';
 import { FeedbackButtons } from './FeedbackButtons';
-import { processHTMLBulletsWithFormatting, processHTMLWithNesting } from '../utils/htmlBulletProcessor';
+import { processHTMLBulletsWithFormatting, processHTMLWithNesting, convertMarkdownToHTML } from '../utils/htmlBulletProcessor';
 import { 
   Select,
   SelectContent,
@@ -75,6 +75,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { apiClient } from '../utils/api';
+import { projectId, publicAnonKey } from '../utils/supabase/info';
 import {
   Dialog,
   DialogContent,
@@ -174,16 +175,20 @@ export function AIRewritePanel({
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [highlightSettings, setHighlightSettings] = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const [showScrollIndicator, setShowScrollIndicator] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(false);
   
   // Refs for scrolling to settings
   const settingsRef = useRef<HTMLDivElement>(null);
   const industryToneRef = useRef<HTMLButtonElement>(null);
   const rewriteStyleRef = useRef<HTMLButtonElement>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
   const [showPhotoDialog, setShowPhotoDialog] = useState(false);
   const [showAddSectionDialog, setShowAddSectionDialog] = useState(false);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editingSectionName, setEditingSectionName] = useState<string>('');
+  const [hoveredSectionId, setHoveredSectionId] = useState<string | null>(null);
   
   // AI Improve dialog state
   const [improveDialogOpen, setImproveDialogOpen] = useState(false);
@@ -256,9 +261,92 @@ export function AIRewritePanel({
     }
   }, [industryTone, rewriteStyle]);
 
+  // Handle preview scroll to show/hide scroll indicator
+  const handlePreviewScroll = () => {
+    if (previewContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = previewContainerRef.current;
+      const hasMoreContent = scrollHeight > clientHeight;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 50; // 50px threshold
+      
+      setShowScrollIndicator(hasMoreContent && !atBottom);
+      setIsAtBottom(atBottom);
+    }
+  };
+
+  // Check scroll indicator on content change
+  useEffect(() => {
+    handlePreviewScroll();
+  }, [resumeData, sectionOrder, isPreviewVisible]);
+
+  const scrollPreviewDown = () => {
+    if (previewContainerRef.current) {
+      previewContainerRef.current.scrollBy({
+        top: 400,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  const scrollPreviewUp = () => {
+    if (previewContainerRef.current) {
+      previewContainerRef.current.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    }
+  };
+
   const parseResumeData = (data: any) => {
     // Convert cached parsed data to ResumeData format
     const fullText = [data.name, data.contact, data.summary, data.experience, data.education, data.skills].join('\n');
+    
+    // Build custom sections from parsed data (awards, certifications, projects, etc.)
+    const customSections: ResumeData['customSections'] = [];
+    
+    // Map of section fields to their titles
+    const sectionMappings = [
+      { field: 'projects', titleField: 'projectsTitle', defaultTitle: 'Projects' },
+      { field: 'certifications', titleField: 'certificationsTitle', defaultTitle: 'Certifications' },
+      { field: 'publications', titleField: 'publicationsTitle', defaultTitle: 'Publications' },
+      { field: 'patents', titleField: 'patentsTitle', defaultTitle: 'Patents' },
+      { field: 'presentations', titleField: 'presentationsTitle', defaultTitle: 'Presentations' },
+      { field: 'awards', titleField: 'awardsTitle', defaultTitle: 'Awards' },
+      { field: 'activities', titleField: 'activitiesTitle', defaultTitle: 'Activities' },
+      { field: 'languages', titleField: 'languagesTitle', defaultTitle: 'Languages' },
+      { field: 'interests', titleField: 'interestsTitle', defaultTitle: 'Interests' },
+      { field: 'references', titleField: 'referencesTitle', defaultTitle: 'References' },
+      { field: 'courses', titleField: 'coursesTitle', defaultTitle: 'Courses' },
+    ];
+    
+    sectionMappings.forEach(({ field, titleField, defaultTitle }, index) => {
+      const content = data[field];
+      if (content && content.trim()) {
+        customSections.push({
+          id: `custom-${field}-${Date.now()}-${index}`,
+          title: data[titleField] || defaultTitle,
+          // Convert markdown to HTML for proper display
+          content: convertMarkdownToHTML(content.trim())
+        });
+      }
+    });
+    
+    // Also add any existing custom sections from the parsed data
+    if (data.customSections && Array.isArray(data.customSections)) {
+      data.customSections.forEach((section: any) => {
+        if (section.content && section.content.trim()) {
+          customSections.push({
+            id: section.id || `custom-${Date.now()}-${customSections.length}`,
+            title: section.title || 'Custom Section',
+            // Convert markdown to HTML for proper display
+            content: convertMarkdownToHTML(section.content.trim())
+          });
+        }
+      });
+    }
+    
+    // Convert markdown to HTML for summary and skills
+    const convertedSummary = convertMarkdownToHTML(data.summary || '');
+    const convertedSkills = convertMarkdownToHTML(data.skills || '');
     
     const parsed: ResumeData = {
       personalDetails: {
@@ -277,16 +365,69 @@ export function AIRewritePanel({
         linkedin: extractLinkedIn(data.contact || ''),
         website: extractWebsite(fullText)
       },
-      summary: data.summary || '',
+      summary: convertedSummary,
       experience: parseExperience(data.experience || ''),
       education: parseEducation(data.education || ''),
       skills: parseSkills(data.skills || ''),
-      skillsRichText: data.skills || '',
+      skillsRichText: convertedSkills,
       links: parseLinks(fullText),
-      customSections: parseCustomSections(fullText)
+      customSections: customSections
     };
 
     setResumeData(parsed);
+    
+    // Update section order based on what sections have content
+    updateSectionOrderFromData(parsed, data);
+  };
+  
+  // Update section order to only show sections that have content
+  const updateSectionOrderFromData = (parsed: ResumeData, originalData: any) => {
+    const newSectionOrder: SectionOrder[] = [];
+    
+    // Personal Details - always show if name exists
+    if (parsed.personalDetails.firstName || parsed.personalDetails.lastName || originalData.name) {
+      newSectionOrder.push({ id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true });
+    }
+    
+    // Contact - show if any contact info exists
+    if (parsed.contact.email || parsed.contact.phone || parsed.contact.address || parsed.contact.linkedin || parsed.contact.website || originalData.contact) {
+      newSectionOrder.push({ id: 'contact', type: 'contact', label: 'Contact Information', visible: true });
+    }
+    
+    // Summary - always show (can be generated by AI even if empty)
+    newSectionOrder.push({ id: 'summary', type: 'summary', label: originalData.summaryTitle || 'Professional Summary', visible: true });
+    
+    // Experience - only show if experience exists
+    if (parsed.experience && parsed.experience.length > 0) {
+      newSectionOrder.push({ id: 'experience', type: 'experience', label: originalData.experienceTitle || 'Employment History', visible: true });
+    }
+    
+    // Education - only show if education exists
+    if (parsed.education && parsed.education.length > 0) {
+      newSectionOrder.push({ id: 'education', type: 'education', label: originalData.educationTitle || 'Education', visible: true });
+    }
+    
+    // Skills - only show if skills exist
+    if ((parsed.skills && parsed.skills.length > 0) || (parsed.skillsRichText && parsed.skillsRichText.trim())) {
+      newSectionOrder.push({ id: 'skills', type: 'skills', label: originalData.skillsTitle || 'Skills', visible: true });
+    }
+    
+    // Links - only show if links exist
+    if (parsed.links && parsed.links.length > 0) {
+      newSectionOrder.push({ id: 'links', type: 'links', label: 'Links', visible: true });
+    }
+    
+    // Add custom sections (awards, certifications, projects, etc.)
+    parsed.customSections.forEach(section => {
+      newSectionOrder.push({
+        id: section.id,
+        type: 'customSections',
+        label: section.title,
+        visible: true
+      });
+    });
+    
+    setSectionOrder(newSectionOrder);
   };
 
   const parseResumeFromText = (text: string) => {
@@ -333,6 +474,59 @@ export function AIRewritePanel({
     };
 
     setResumeData(parsed);
+    
+    // Update section order based on what sections have content (for text parsing)
+    updateSectionOrderFromParsedData(parsed);
+  };
+  
+  // Update section order for text-parsed data
+  const updateSectionOrderFromParsedData = (parsed: ResumeData) => {
+    const newSectionOrder: SectionOrder[] = [];
+    
+    // Personal Details - always show if name exists
+    if (parsed.personalDetails.firstName || parsed.personalDetails.lastName) {
+      newSectionOrder.push({ id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true });
+    }
+    
+    // Contact - show if any contact info exists
+    if (parsed.contact.email || parsed.contact.phone || parsed.contact.address || parsed.contact.linkedin || parsed.contact.website) {
+      newSectionOrder.push({ id: 'contact', type: 'contact', label: 'Contact Information', visible: true });
+    }
+    
+    // Summary - always show (can be generated by AI even if empty)
+    newSectionOrder.push({ id: 'summary', type: 'summary', label: 'Professional Summary', visible: true });
+    
+    // Experience - only show if experience exists
+    if (parsed.experience && parsed.experience.length > 0) {
+      newSectionOrder.push({ id: 'experience', type: 'experience', label: 'Employment History', visible: true });
+    }
+    
+    // Education - only show if education exists
+    if (parsed.education && parsed.education.length > 0) {
+      newSectionOrder.push({ id: 'education', type: 'education', label: 'Education', visible: true });
+    }
+    
+    // Skills - only show if skills exist
+    if ((parsed.skills && parsed.skills.length > 0) || (parsed.skillsRichText && parsed.skillsRichText.trim())) {
+      newSectionOrder.push({ id: 'skills', type: 'skills', label: 'Skills', visible: true });
+    }
+    
+    // Links - only show if links exist
+    if (parsed.links && parsed.links.length > 0) {
+      newSectionOrder.push({ id: 'links', type: 'links', label: 'Links', visible: true });
+    }
+    
+    // Add custom sections (awards, certifications, projects, etc.)
+    parsed.customSections.forEach(section => {
+      newSectionOrder.push({
+        id: section.id,
+        type: 'customSections',
+        label: section.title,
+        visible: true
+      });
+    });
+    
+    setSectionOrder(newSectionOrder);
   };
 
   // Helper functions for parsing
@@ -796,6 +990,38 @@ export function AIRewritePanel({
   };
 
   const handleAddSection = (sectionId: string, title: string) => {
+    // Handle Professional Summary as a core section, not a custom section
+    if (sectionId === 'summary') {
+      // Check if summary section already exists in section order
+      const summaryExists = sectionOrder.some(s => s.type === 'summary');
+      
+      if (summaryExists) {
+        toast.info('Professional Summary section already exists');
+        setCurrentSection('summary');
+        return;
+      }
+      
+      // Add summary section to section order (insert after contact or at position 2)
+      const contactIndex = sectionOrder.findIndex(s => s.type === 'contact');
+      const insertIndex = contactIndex >= 0 ? contactIndex + 1 : 2;
+      
+      setSectionOrder(prev => {
+        const newOrder = [...prev];
+        newOrder.splice(insertIndex, 0, {
+          id: 'summary',
+          type: 'summary',
+          label: 'Professional Summary',
+          visible: true
+        });
+        return newOrder;
+      });
+      
+      setCurrentSection('summary');
+      toast.success('Professional Summary section added!');
+      return;
+    }
+    
+    // Handle other sections as custom sections
     const newSection = {
       id: sectionId,
       title: title,
@@ -880,16 +1106,74 @@ export function AIRewritePanel({
   const handleDeleteSection = (sectionId: string, sectionType: SectionType, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Prevent deletion of core sections
-    const coreSections = ['personalDetails', 'contact', 'summary', 'experience', 'education', 'skills', 'links'];
-    if (coreSections.includes(sectionType)) {
-      toast.error('Cannot delete core resume sections');
-      return;
+    // Find the section label for the toast message
+    const sectionToDelete = sectionOrder.find(s => s.id === sectionId);
+    const sectionLabel = sectionToDelete?.label || sectionType;
+    
+    // Handle deletion based on section type
+    if (sectionType === 'customSections') {
+      // Delete custom section data
+      deleteCustomSection(sectionId);
+    } else if (sectionType === 'experience') {
+      // Clear all experience entries
+      setResumeData(prev => ({ ...prev, experience: [] }));
+    } else if (sectionType === 'education') {
+      // Clear all education entries
+      setResumeData(prev => ({ ...prev, education: [] }));
+    } else if (sectionType === 'skills') {
+      // Clear skills
+      setResumeData(prev => ({ ...prev, skills: [], skillsRichText: '' }));
+    } else if (sectionType === 'links') {
+      // Clear links
+      setResumeData(prev => ({ ...prev, links: [] }));
+    } else if (sectionType === 'summary') {
+      // Clear summary
+      setResumeData(prev => ({ ...prev, summary: '' }));
+    } else if (sectionType === 'personalDetails') {
+      // Clear personal details
+      setResumeData(prev => ({
+        ...prev,
+        personalDetails: {
+          firstName: '',
+          lastName: '',
+          jobTitle: '',
+          nationality: '',
+          driversLicense: '',
+          birthDate: '',
+          photoUrl: ''
+        }
+      }));
+    } else if (sectionType === 'contact') {
+      // Clear contact info
+      setResumeData(prev => ({
+        ...prev,
+        contact: {
+          email: '',
+          phone: '',
+          address: '',
+          linkedin: '',
+          website: ''
+        }
+      }));
     }
-
-    // Delete custom section
-    deleteCustomSection(sectionId);
-    toast.success('Section deleted');
+    
+    // Remove from section order
+    setSectionOrder(prev => prev.filter(s => s.id !== sectionId));
+    
+    // If the deleted section was the current section, navigate to the first available section
+    const isCurrentSection = sectionType === 'customSections' 
+      ? currentSection === sectionId 
+      : currentSection === sectionType;
+    
+    if (isCurrentSection) {
+      const remainingSections = sectionOrder.filter(s => s.id !== sectionId);
+      if (remainingSections.length > 0) {
+        const firstSection = remainingSections[0];
+        setCurrentSection(firstSection.type === 'customSections' ? firstSection.id : firstSection.type);
+      }
+    }
+    
+    toast.success(`${sectionLabel} section deleted`);
   };
 
   // Drag and drop handlers
@@ -963,6 +1247,86 @@ export function AIRewritePanel({
     setImproveDialogIsList(isList);
     setImproveDialogCallback(() => callback);
     setImproveDialogOpen(true);
+  };
+
+  // Generate professional summary from resume content
+  const generateSummaryFromResume = async () => {
+    try {
+      // Build context from resume data
+      const resumeContext = buildResumeContext();
+      
+      // Call the improve-content endpoint with the resume context
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-bc1c5df9/generate-summary`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({
+            resumeContext,
+            industryTone,
+            rewriteStyle,
+            jobDescription: jobDescription || '',
+          })
+        }
+      );
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        updateSummary(result.summary);
+        toast.success('Professional summary generated successfully!');
+      } else {
+        toast.error(result.error || 'Failed to generate summary');
+      }
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      toast.error('Failed to generate summary');
+    }
+  };
+
+  // Build resume context for AI summary generation
+  const buildResumeContext = () => {
+    const context: string[] = [];
+    
+    // Add personal details
+    if (resumeData.personalDetails.jobTitle) {
+      context.push(`Job Title: ${resumeData.personalDetails.jobTitle}`);
+    }
+    
+    // Add experience
+    if (resumeData.experience && resumeData.experience.length > 0) {
+      context.push('\nExperience:');
+      resumeData.experience.forEach(exp => {
+        if (exp.title || exp.company) {
+          context.push(`- ${exp.title}${exp.company ? ' at ' + exp.company : ''}`);
+          if (exp.description) {
+            // Strip HTML tags for context
+            const plainText = exp.description.replace(/<[^>]*>/g, '').trim();
+            context.push(`  ${plainText}`);
+          }
+        }
+      });
+    }
+    
+    // Add education
+    if (resumeData.education && resumeData.education.length > 0) {
+      context.push('\nEducation:');
+      resumeData.education.forEach(edu => {
+        if (edu.degree || edu.institution) {
+          context.push(`- ${edu.degree}${edu.institution ? ' from ' + edu.institution : ''}`);
+        }
+      });
+    }
+    
+    // Add skills
+    if (resumeData.skills && resumeData.skills.length > 0) {
+      context.push(`\nSkills: ${resumeData.skills.join(', ')}`);
+    }
+    
+    return context.join('\n');
   };
 
   const toggleSectionVisibility = (id: string) => {
@@ -1336,6 +1700,80 @@ export function AIRewritePanel({
     return text;
   };
 
+  // Helper function to render processed content items with proper header styling
+  const renderProcessedItem = (item: any, idx: number, allItems: any[]) => {
+    const indent = item.indent || 0;
+    const marginLeft = indent * 24;
+    
+    // Skip items with no content
+    if (!item.content || !item.content.trim()) {
+      return null;
+    }
+    
+    // Render headers with special styling
+    if (item.type === 'header') {
+      return (
+        <div 
+          key={idx} 
+          className="font-semibold text-gray-900 mt-3 mb-1 text-sm" 
+          style={{ marginLeft: `${marginLeft}px` }}
+          dangerouslySetInnerHTML={{ __html: item.content }} 
+        />
+      );
+    }
+    
+    if (item.type === 'subheader') {
+      return (
+        <div 
+          key={idx} 
+          className="text-sm text-gray-800 mb-1" 
+          style={{ marginLeft: `${marginLeft}px` }}
+          dangerouslySetInnerHTML={{ __html: item.content }} 
+        />
+      );
+    }
+    
+    if (item.type === 'bullet') {
+      // Determine bullet character based on style
+      let bulletChar = '•';
+      if (item.bulletStyle === 'number') {
+        // Count how many numbered items at this indent level we've seen so far
+        const numberedItemsBeforeThis = allItems
+          .slice(0, idx)
+          .filter(prevItem => 
+            prevItem.type === 'bullet' && 
+            prevItem.bulletStyle === 'number' && 
+            (prevItem.indent || 0) === indent
+          ).length;
+        bulletChar = `${numberedItemsBeforeThis + 1}.`;
+      } else if (item.bulletStyle === 'hollow') {
+        bulletChar = '○';
+      }
+      
+      // Apply header styling if this bullet is a header
+      const bulletClasses = item.isHeader && item.headerLevel === 2 
+        ? "flex items-start gap-2 mb-1" 
+        : "flex items-start gap-2 mb-1";
+      
+      return (
+        <div key={idx} className={bulletClasses} style={{ marginLeft: `${marginLeft}px` }}>
+          <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
+          <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
+        </div>
+      );
+    }
+    
+    // Regular text
+    return (
+      <div 
+        key={idx} 
+        className="mb-1" 
+        style={{ marginLeft: `${marginLeft}px` }} 
+        dangerouslySetInnerHTML={{ __html: item.content }} 
+      />
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Settings Panel */}
@@ -1344,7 +1782,8 @@ export function AIRewritePanel({
           ref={settingsRef}
           className="bg-white border-b shadow-sm p-6"
         >
-          <div className="w-4/5 mx-auto">
+          {/* 90% width, centered - cross-browser compatible (Chrome, Safari, Firefox, Edge) */}
+          <div style={{ width: '90%', maxWidth: '1800px', marginLeft: 'auto', marginRight: 'auto' }}>
             {/* Header */}
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">
@@ -1401,8 +1840,8 @@ export function AIRewritePanel({
                   </SelectContent>
                 </Select>
                 {!industryTone && (
-                  <div className="flex items-start gap-2 mt-2 text-sm text-amber-700">
-                    <span className="text-amber-500">⚠</span>
+                  <div className="flex items-start gap-2 mt-2 text-sm" style={{ color: '#ea580c' }}>
+                    <span style={{ color: '#f97316' }}>⚠</span>
                     <span>Please select an industry tone to adjust the language style</span>
                   </div>
                 )}
@@ -1426,8 +1865,8 @@ export function AIRewritePanel({
                   </SelectContent>
                 </Select>
                 {!rewriteStyle && (
-                  <div className="flex items-start gap-2 mt-2 text-sm text-amber-700">
-                    <span className="text-amber-500">⚠</span>
+                  <div className="flex items-start gap-2 mt-2 text-sm" style={{ color: '#ea580c' }}>
+                    <span style={{ color: '#f97316' }}>⚠</span>
                     <span>Please select a rewrite style to determine the level of detail</span>
                   </div>
                 )}
@@ -1444,17 +1883,17 @@ export function AIRewritePanel({
         </div>
       )}
 
-      {/* Main content container with consistent padding - 80% width */}
-      <div className="w-4/5 mx-auto px-4">
+      {/* Main content container - 90% width, centered for all browsers (Chrome, Safari, Firefox, Edge) */}
+      <div style={{ width: '90%', maxWidth: '1800px', marginLeft: 'auto', marginRight: 'auto', paddingLeft: '1rem', paddingRight: '1rem' }}>
         {/* Review Note */}
         <div className="py-3 flex items-center gap-2 text-blue-600">
           <FileText className="w-4 h-4" />
           <span className="text-sm">Review and edit each section of your resume. Make sure all information is accurate before proceeding to optimization.</span>
         </div>
 
-        <div className="flex h-[calc(100vh-80px)]">
-        {/* Left Sidebar Navigation - 1/6 of width */}
-        <div className="flex-1 bg-white border-r">
+        <div style={{ display: 'flex', flexDirection: 'row', height: 'calc(100vh - 80px)', width: '100%' }}>
+        {/* Left Sidebar Navigation - ratio 1 (1:2.5:2.5 layout for all browsers: Chrome, Safari, Firefox, Edge) */}
+        <div className="bg-white border-r" style={{ flex: '1 1 0%', minWidth: '180px', maxWidth: '280px' }}>
           <ScrollArea className="h-full">
             <div className="p-4 space-y-1">
               {getNavigationItems().map((item) => {
@@ -1471,14 +1910,21 @@ export function AIRewritePanel({
                 const { Icon, color } = iconConfig[item.type];
                 const isEditing = editingSectionId === item.id;
                 
+                const isSelected = item.type === 'customSections' 
+                  ? currentSection === item.id 
+                  : currentSection === item.type;
+                
+                const isHovered = hoveredSectionId === item.id;
+                const showButtons = isHovered && !isEditing;
+                
                 return (
                   <div
                     key={item.id}
-                    className={`group w-full flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors ${
-                      (item.type === 'customSections' ? currentSection === item.id : currentSection === item.type)
-                        ? 'bg-blue-50'
-                        : 'hover:bg-gray-50'
+                    className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors ${
+                      isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
                     }`}
+                    onMouseEnter={() => setHoveredSectionId(item.id)}
+                    onMouseLeave={() => setHoveredSectionId(null)}
                   >
                     <button
                       onClick={() => {
@@ -1510,14 +1956,15 @@ export function AIRewritePanel({
                         />
                       ) : (
                         <span className={`text-sm truncate ${
-                          currentSection === item.type ? 'text-blue-600' : 'text-gray-700'
+                          isSelected ? 'text-blue-600' : 'text-gray-700'
                         }`}>
                           {item.label}
                         </span>
                       )}
                     </button>
-                    {!isEditing && (
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* Edit and Delete buttons - only shown on hover */}
+                    {showButtons && (
+                      <div className="flex items-center gap-1">
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -1533,23 +1980,21 @@ export function AIRewritePanel({
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
-                        {item.type === 'customSections' && (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  onClick={(e) => handleDeleteSection(item.id, item.type, e)}
-                                  className="p-1 hover:bg-red-100 rounded"
-                                >
-                                  <Trash2 className="w-3 h-3 text-red-500" />
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Delete section</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                onClick={(e) => handleDeleteSection(item.id, item.type, e)}
+                                className="p-1 hover:bg-red-100 rounded"
+                              >
+                                <Trash2 className="w-3 h-3 text-red-500" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Delete section</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </div>
                     )}
                   </div>
@@ -1567,8 +2012,8 @@ export function AIRewritePanel({
           </ScrollArea>
         </div>
 
-        {/* Center - Editing Area - 3/6 of width */}
-        <div className={`${isPreviewVisible ? "flex-[3]" : "flex-[5]"} overflow-auto`}>
+        {/* Center - Editing Area - ratio 2.5 (or 5 when preview hidden) for all browsers: Chrome, Safari, Firefox, Edge */}
+        <div className="overflow-auto" style={{ flex: isPreviewVisible ? '2.5 1 0%' : '5 1 0%' }}>
           <div className="px-8 pt-4 pb-8 max-w-none">
             {/* Toggle Preview Button */}
             <div className="flex justify-end mb-4">
@@ -1809,38 +2254,41 @@ export function AIRewritePanel({
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <Label htmlFor="summary">Summary</Label>
-                      {resumeData.summary && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                          onClick={() => {
-                            if (industryTone && rewriteStyle) {
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                        onClick={() => {
+                          if (industryTone && rewriteStyle) {
+                            // Generate summary from entire resume if empty, otherwise improve existing
+                            if (!resumeData.summary || !resumeData.summary.trim()) {
+                              generateSummaryFromResume();
+                            } else {
                               openImproveDialog(
                                 resumeData.summary,
                                 'summary',
                                 false,
                                 (improvedContent) => updateSummary(improvedContent)
                               );
-                            } else {
-                              navigateToSettings();
                             }
-                          }}
-                        >
-                          <Sparkles className="w-4 h-4 mr-2" />
-                          Improve with AI
-                        </Button>
-                      )}
+                          } else {
+                            navigateToSettings();
+                          }
+                        }}
+                      >
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        {!resumeData.summary || !resumeData.summary.trim() ? 'Generate with AI' : 'Improve with AI'}
+                      </Button>
                     </div>
                     <RichTextEditor
                       value={resumeData.summary}
                       onChange={(value) => updateSummary(value)}
-                      placeholder="Write a compelling professional summary..."
+                      placeholder="Write a compelling professional summary or click 'Generate with AI' to create one based on your resume..."
                       minHeight="150px"
                     />
                     {industryTone && rewriteStyle && (
                       <p className="text-xs text-gray-500 mt-2">
-                        AI will optimize this using {industryTone} tone with {rewriteStyle} style
+                        AI will {!resumeData.summary || !resumeData.summary.trim() ? 'generate' : 'optimize'} this using {industryTone} tone with {rewriteStyle} style{jobDescription ? ' and job description' : ''}
                       </p>
                     )}
                     
@@ -1941,30 +2389,34 @@ export function AIRewritePanel({
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <Label>Description</Label>
-                            {exp.description && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                                onClick={() => {
-                                  if (industryTone && rewriteStyle) {
-                                    // Check if description contains bullets
-                                    const hasBullets = exp.description.includes('•') || exp.description.includes('<li>');
-                                    openImproveDialog(
-                                      exp.description,
-                                      'experience',
-                                      hasBullets,
-                                      (improvedContent) => updateExperience(exp.id, 'description', improvedContent)
-                                    );
-                                  } else {
-                                    navigateToSettings();
-                                  }
-                                }}
-                              >
-                                <Sparkles className="w-4 h-4 mr-2" />
-                                Improve with AI
-                              </Button>
-                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                              onClick={() => {
+                                if (!exp.description || !exp.description.trim()) {
+                                  toast.warning('Please add some content first', {
+                                    description: 'Add your job description before using AI improvement'
+                                  });
+                                  return;
+                                }
+                                if (industryTone && rewriteStyle) {
+                                  // Check if description contains bullets
+                                  const hasBullets = exp.description.includes('•') || exp.description.includes('<li>');
+                                  openImproveDialog(
+                                    exp.description,
+                                    'experience',
+                                    hasBullets,
+                                    (improvedContent) => updateExperience(exp.id, 'description', improvedContent)
+                                  );
+                                } else {
+                                  navigateToSettings();
+                                }
+                              }}
+                            >
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              Improve with AI
+                            </Button>
                           </div>
                           <RichTextEditor
                             value={exp.description}
@@ -2077,29 +2529,33 @@ export function AIRewritePanel({
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <Label>Details (GPA, honors, coursework)</Label>
-                            {edu.details && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                                onClick={() => {
-                                  if (industryTone && rewriteStyle) {
-                                    const hasBullets = edu.details.includes('•') || edu.details.includes('<li>');
-                                    openImproveDialog(
-                                      edu.details,
-                                      'education',
-                                      hasBullets,
-                                      (improvedContent) => updateEducation(edu.id, 'details', improvedContent)
-                                    );
-                                  } else {
-                                    navigateToSettings();
-                                  }
-                                }}
-                              >
-                                <Sparkles className="w-4 h-4 mr-2" />
-                                        Improve with AI
-                                      </Button>
-                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                              onClick={() => {
+                                if (!edu.details || !edu.details.trim()) {
+                                  toast.warning('Please add some content first', {
+                                    description: 'Add education details before using AI improvement'
+                                  });
+                                  return;
+                                }
+                                if (industryTone && rewriteStyle) {
+                                  const hasBullets = edu.details.includes('•') || edu.details.includes('<li>');
+                                  openImproveDialog(
+                                    edu.details,
+                                    'education',
+                                    hasBullets,
+                                    (improvedContent) => updateEducation(edu.id, 'details', improvedContent)
+                                  );
+                                } else {
+                                  navigateToSettings();
+                                }
+                              }}
+                            >
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              Improve with AI
+                            </Button>
                           </div>
                           <RichTextEditor
                             value={edu.details}
@@ -2136,34 +2592,38 @@ export function AIRewritePanel({
                     </p>
                   </div>
                   <div>
-                    {resumeData.skillsRichText && (
-                      <div className="flex justify-end mb-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                          onClick={() => {
-                            if (industryTone && rewriteStyle) {
-                              const hasBullets = resumeData.skillsRichText.includes('•') || resumeData.skillsRichText.includes('<li>');
-                              openImproveDialog(
-                                resumeData.skillsRichText,
-                                'skills',
-                                hasBullets,
-                                (improvedContent) => setResumeData(prev => ({
-                                  ...prev,
-                                  skillsRichText: improvedContent
-                                }))
-                              );
-                            } else {
-                              navigateToSettings();
-                            }
-                          }}
-                        >
-                          <Sparkles className="w-4 h-4 mr-2" />
-                          Improve with AI
-                        </Button>
-                      </div>
-                    )}
+                    <div className="flex justify-end mb-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                        onClick={() => {
+                          if (!resumeData.skillsRichText || !resumeData.skillsRichText.trim()) {
+                            toast.warning('Please add some content first', {
+                              description: 'Add your skills before using AI improvement'
+                            });
+                            return;
+                          }
+                          if (industryTone && rewriteStyle) {
+                            const hasBullets = resumeData.skillsRichText.includes('•') || resumeData.skillsRichText.includes('<li>');
+                            openImproveDialog(
+                              resumeData.skillsRichText,
+                              'skills',
+                              hasBullets,
+                              (improvedContent) => setResumeData(prev => ({
+                                ...prev,
+                                skillsRichText: improvedContent
+                              }))
+                            );
+                          } else {
+                            navigateToSettings();
+                          }
+                        }}
+                      >
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        Improve with AI
+                      </Button>
+                    </div>
                     <RichTextEditor
                       value={typeof resumeData.skillsRichText === 'string' ? resumeData.skillsRichText : resumeData.skills.join('\n')}
                       onChange={(value) => setResumeData(prev => ({
@@ -2259,29 +2719,33 @@ export function AIRewritePanel({
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Label>Content</Label>
-                        {section.content && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                            onClick={() => {
-                              if (industryTone && rewriteStyle) {
-                                const hasBullets = section.content.includes('•') || section.content.includes('<li>');
-                                openImproveDialog(
-                                  section.content,
-                                  'custom',
-                                  hasBullets,
-                                  (improvedContent) => updateCustomSection(section.id, 'content', improvedContent)
-                                );
-                              } else {
-                                navigateToSettings();
-                              }
-                            }}
-                          >
-                            <Sparkles className="w-4 h-4 mr-2" />
-                            Improve with AI
-                          </Button>
-                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                          onClick={() => {
+                            if (!section.content || !section.content.trim()) {
+                              toast.warning('Please add some content first', {
+                                description: 'Add content to this section before using AI improvement'
+                              });
+                              return;
+                            }
+                            if (industryTone && rewriteStyle) {
+                              const hasBullets = section.content.includes('•') || section.content.includes('<li>');
+                              openImproveDialog(
+                                section.content,
+                                'custom',
+                                hasBullets,
+                                (improvedContent) => updateCustomSection(section.id, 'content', improvedContent)
+                              );
+                            } else {
+                              navigateToSettings();
+                            }
+                          }}
+                        >
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          Improve with AI
+                        </Button>
                       </div>
                       <RichTextEditor
                         value={section.content}
@@ -2343,9 +2807,17 @@ export function AIRewritePanel({
           </div>
         </div>
 
-        {/* Right - Live Preview - 2/6 of width */}
+        {/* Right - Live Preview - ratio 2.5 for all browsers: Chrome, Safari, Firefox, Edge */}
         {isPreviewVisible && (
-        <div className="flex-[2] bg-gray-50 border-l overflow-auto">
+        <div 
+          className="bg-gray-50 border-l relative" 
+          style={{ flex: '2.5 1 0%', height: '100%', overflow: 'hidden' }}
+        >
+          <div
+            ref={previewContainerRef}
+            onScroll={handlePreviewScroll}
+            style={{ height: '100%', overflowY: 'auto' }}
+          >
           <div className="sticky top-0 bg-white border-b p-4 flex items-center justify-between z-10">
             <div className="flex items-center gap-2">
               <Save className="w-4 h-4 text-green-600" />
@@ -2416,55 +2888,9 @@ export function AIRewritePanel({
                       console.log('📄 SUMMARY PREVIEW - Item count:', processedSummary.length);
                       return (
                         <div key={section.id}>
-                          <h3 className="text-sm font-semibold mb-2 uppercase">Professional Summary</h3>
+                          <h3 className="text-base font-bold mb-3 uppercase tracking-wide text-gray-800 border-b border-gray-300 pb-1">Professional Summary</h3>
                           <div className="text-sm text-gray-700 leading-relaxed">
-                            {processedSummary.map((item, idx) => {
-                              const indent = item.indent || 0;
-                              const marginLeft = indent * 24;
-                              
-                              // Skip items with no content
-                              if (!item.content || !item.content.trim()) {
-                                console.warn('⚠️ Skipping empty item in preview:', item);
-                                return null;
-                              }
-                              
-                              console.log(`✅ Rendering item ${idx}:`, { 
-                                type: item.type, 
-                                indent, 
-                                contentLength: item.content.length,
-                                contentPreview: item.content.substring(0, 50) 
-                              });
-                              
-                              if (item.type === 'bullet') {
-                                // Determine bullet character based on style
-                                let bulletChar = '•';
-                                if (item.bulletStyle === 'number') {
-                                  // Count how many numbered items at this indent level we've seen so far
-                                  const numberedItemsBeforeThis = processedSummary
-                                    .slice(0, idx)
-                                    .filter(prevItem => 
-                                      prevItem.type === 'bullet' && 
-                                      prevItem.bulletStyle === 'number' && 
-                                      (prevItem.indent || 0) === indent
-                                    ).length;
-                                  bulletChar = `${numberedItemsBeforeThis + 1}.`;
-                                } else if (item.bulletStyle === 'hollow') {
-                                  bulletChar = '○';
-                                } else {
-                                  bulletChar = '•';
-                                }
-                                return (
-                                  <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                    <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
-                                    <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
-                                );
-                              }
-                            })}
+                            {processedSummary.map((item, idx) => renderProcessedItem(item, idx, processedSummary))}
                           </div>
                         </div>
                       );
@@ -2473,62 +2899,20 @@ export function AIRewritePanel({
                       if (resumeData.experience.length === 0) return null;
                       return (
                         <div key={section.id}>
-                          <h3 className="text-sm font-semibold mb-3 uppercase">Employment History</h3>
+                          <h3 className="text-base font-bold mb-3 uppercase tracking-wide text-gray-800 border-b border-gray-300 pb-1">Employment History</h3>
                           {resumeData.experience.map((exp) => {
-                            console.log('💼 EXPERIENCE PREVIEW - Raw HTML:', exp.description);
                             const processedContent = processHTMLWithNesting(exp.description);
-                            console.log('💼 EXPERIENCE PREVIEW - Processed items:', processedContent);
-                            console.log('💼 EXPERIENCE PREVIEW - Item count:', processedContent.length);
                             return (
-                              <div key={exp.id} className="mb-4">
-                                <div className="font-medium text-sm">{exp.title}</div>
-                                <div className="text-sm text-gray-600">
+                              <div key={exp.id} className="mb-5">
+                                <div className="font-semibold text-sm text-gray-900">{exp.title}</div>
+                                <div className="text-sm text-gray-600 font-medium">
                                   {exp.company}{exp.location && ` | ${exp.location}`}
                                 </div>
-                                <div className="text-xs text-gray-500 mb-2">
+                                <div className="text-xs text-gray-500 mb-2 italic">
                                   {exp.startDate} - {exp.current ? 'Present' : exp.endDate}
                                 </div>
                                 <div className="text-sm text-gray-700">
-                                  {processedContent.map((item, idx) => {
-                                    const indent = item.indent || 0;
-                                    const marginLeft = indent * 24;
-                                    
-                                    // Skip items with no content
-                                    if (!item.content || !item.content.trim()) {
-                                      console.warn('Skipping empty item in experience preview:', item);
-                                      return null;
-                                    }
-                                    
-                                    if (item.type === 'bullet') {
-                                      // Determine bullet character based on style
-                                      let bulletChar = '•';
-                                      if (item.bulletStyle === 'number') {
-                                        // Count how many numbered items at this indent level we've seen so far
-                                        const numberedItemsBeforeThis = processedContent
-                                          .slice(0, idx)
-                                          .filter(prevItem => 
-                                            prevItem.type === 'bullet' && 
-                                            prevItem.bulletStyle === 'number' && 
-                                            (prevItem.indent || 0) === indent
-                                          ).length;
-                                        bulletChar = `${numberedItemsBeforeThis + 1}.`;
-                                      } else if (item.bulletStyle === 'hollow') {
-                                        bulletChar = '○';
-                                      } else {
-                                        bulletChar = '•';
-                                      }
-                                      return (
-                                        <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                          <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
-                                          <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
-                                        </div>
-                                      );
-                                    } else {
-                                      return (
-                                        <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
-                                      );
-                                    }
-                                  })}
+                                  {processedContent.map((item, idx) => renderProcessedItem(item, idx, processedContent))}
                                 </div>
                               </div>
                             );
@@ -2540,54 +2924,21 @@ export function AIRewritePanel({
                       if (resumeData.education.length === 0) return null;
                       return (
                         <div key={section.id}>
-                          <h3 className="text-sm font-semibold mb-3 uppercase">Education</h3>
+                          <h3 className="text-base font-bold mb-3 uppercase tracking-wide text-gray-800 border-b border-gray-300 pb-1">Education</h3>
                           {resumeData.education.map((edu) => {
                             const processedDetails = edu.details ? processHTMLWithNesting(edu.details) : [];
                             return (
-                              <div key={edu.id} className="mb-3">
-                                <div className="font-medium text-sm">{edu.degree}</div>
-                                <div className="text-sm text-gray-600">
+                              <div key={edu.id} className="mb-4">
+                                <div className="font-semibold text-sm text-gray-900">{edu.degree}</div>
+                                <div className="text-sm text-gray-600 font-medium">
                                   {edu.institution}{edu.location && ` | ${edu.location}`}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-gray-500 italic">
                                   {edu.startDate} - {edu.current ? 'Present' : edu.endDate}
                                 </div>
                                 {processedDetails.length > 0 && (
                                   <div className="text-sm text-gray-700 mt-1">
-                                    {processedDetails.map((item, idx) => {
-                                      const indent = item.indent || 0;
-                                      const marginLeft = indent * 24;
-                                      
-                                      if (item.type === 'bullet') {
-                                        // Determine bullet character based on style
-                                        let bulletChar = '•';
-                                        if (item.bulletStyle === 'number') {
-                                          // Count how many numbered items at this indent level we've seen so far
-                                          const numberedItemsBeforeThis = processedDetails
-                                            .slice(0, idx)
-                                            .filter(prevItem => 
-                                              prevItem.type === 'bullet' && 
-                                              prevItem.bulletStyle === 'number' && 
-                                              (prevItem.indent || 0) === indent
-                                            ).length;
-                                          bulletChar = `${numberedItemsBeforeThis + 1}.`;
-                                        } else if (item.bulletStyle === 'hollow') {
-                                          bulletChar = '○';
-                                        } else {
-                                          bulletChar = '•';
-                                        }
-                                        return (
-                                          <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                            <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
-                                            <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
-                                          </div>
-                                        );
-                                      } else {
-                                        return (
-                                          <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
-                                        );
-                                      }
-                                    })}
+                                    {processedDetails.map((item, idx) => renderProcessedItem(item, idx, processedDetails))}
                                   </div>
                                 )}
                               </div>
@@ -2602,43 +2953,9 @@ export function AIRewritePanel({
                       const processedSkills = processHTMLWithNesting(skillsContent);
                       return (
                         <div key={section.id}>
-                          <h3 className="text-sm font-semibold mb-2 uppercase">Skills</h3>
+                          <h3 className="text-base font-bold mb-3 uppercase tracking-wide text-gray-800 border-b border-gray-300 pb-1">Skills</h3>
                           <div className="text-sm text-gray-700">
-                            {processedSkills.map((item, idx) => {
-                              const indent = item.indent || 0;
-                              const marginLeft = indent * 24; // 24px per indent level
-                              
-                              if (item.type === 'bullet') {
-                                // Determine bullet character based on style
-                                let bulletChar = '•';
-                                if (item.bulletStyle === 'number') {
-                                  // Count how many numbered items at this indent level we've seen so far
-                                  const numberedItemsBeforeThis = processedSkills
-                                    .slice(0, idx)
-                                    .filter(prevItem => 
-                                      prevItem.type === 'bullet' && 
-                                      prevItem.bulletStyle === 'number' && 
-                                      (prevItem.indent || 0) === indent
-                                    ).length;
-                                  bulletChar = `${numberedItemsBeforeThis + 1}.`;
-                                } else if (item.bulletStyle === 'hollow') {
-                                  bulletChar = '○'; // Hollow circle for sub-items
-                                } else if (item.bulletStyle === 'filled') {
-                                  bulletChar = '•'; // Filled circle for main items
-                                }
-                                
-                                return (
-                                  <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                    <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
-                                    <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
-                                );
-                              }
-                            })}
+                            {processedSkills.map((item, idx) => renderProcessedItem(item, idx, processedSkills))}
                           </div>
                         </div>
                       );
@@ -2647,10 +2964,10 @@ export function AIRewritePanel({
                       if (resumeData.links.length === 0) return null;
                       return (
                         <div key={section.id}>
-                          <h3 className="text-sm font-semibold mb-2 uppercase">Links</h3>
+                          <h3 className="text-base font-bold mb-3 uppercase tracking-wide text-gray-800 border-b border-gray-300 pb-1">Links</h3>
                           {resumeData.links.map((link) => (
                             <div key={link.id} className="text-sm text-blue-600">
-                              {link.label}: {link.url}
+                              <span className="font-medium">{link.label}:</span> {link.url}
                             </div>
                           ))}
                         </div>
@@ -2663,42 +2980,9 @@ export function AIRewritePanel({
                       const processedCustomContent = processHTMLWithNesting(customSection.content);
                       return (
                         <div key={section.id}>
-                          <h3 className="text-sm font-semibold mb-2 uppercase">{customSection.title}</h3>
+                          <h3 className="text-base font-bold mb-3 uppercase tracking-wide text-gray-800 border-b border-gray-300 pb-1">{customSection.title}</h3>
                           <div className="text-sm text-gray-700">
-                            {processedCustomContent.map((item, idx) => {
-                              const indent = item.indent || 0;
-                              const marginLeft = indent * 24;
-                              
-                              if (item.type === 'bullet') {
-                                // Determine bullet character based on style
-                                let bulletChar = '•';
-                                if (item.bulletStyle === 'number') {
-                                  // Count how many numbered items at this indent level we've seen so far
-                                  const numberedItemsBeforeThis = processedCustomContent
-                                    .slice(0, idx)
-                                    .filter(prevItem => 
-                                      prevItem.type === 'bullet' && 
-                                      prevItem.bulletStyle === 'number' && 
-                                      (prevItem.indent || 0) === indent
-                                    ).length;
-                                  bulletChar = `${numberedItemsBeforeThis + 1}.`;
-                                } else if (item.bulletStyle === 'hollow') {
-                                  bulletChar = '○';
-                                } else {
-                                  bulletChar = '•';
-                                }
-                                return (
-                                  <div key={idx} className="flex items-start gap-2 mb-1" style={{ marginLeft: `${marginLeft}px` }}>
-                                    <span className="text-gray-600 mt-0.5 min-w-[20px]">{bulletChar}</span>
-                                    <span className="flex-1" dangerouslySetInnerHTML={{ __html: item.content }} />
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <div key={idx} className="mb-1" style={{ marginLeft: `${marginLeft}px` }} dangerouslySetInnerHTML={{ __html: item.content }} />
-                                );
-                              }
-                            })}
+                            {processedCustomContent.map((item, idx) => renderProcessedItem(item, idx, processedCustomContent))}
                           </div>
                         </div>
                       );
@@ -2710,10 +2994,31 @@ export function AIRewritePanel({
               </div>
             </div>
           </div>
+          </div>
+          
+          {/* Scroll indicator buttons - positioned absolute within preview container */}
+          {showScrollIndicator && (
+            <button
+              onClick={scrollPreviewDown}
+              className="absolute bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full shadow-lg transition-all duration-300 animate-bounce z-20"
+              title="Scroll down for more content"
+            >
+              <ChevronDown className="w-5 h-5" />
+            </button>
+          )}
+          {isAtBottom && (
+            <button
+              onClick={scrollPreviewUp}
+              className="absolute bottom-6 right-6 bg-gray-600 hover:bg-gray-700 text-white p-3 rounded-full shadow-lg transition-all duration-300 z-20"
+              title="Scroll back to top"
+            >
+              <ChevronUp className="w-5 h-5" />
+            </button>
+          )}
         </div>
         )}
       </div>
-      </div> {/* End w-4/5 mx-auto container (80% width) */}
+      </div> {/* End 80% width centered container */}
 
       {/* Reorder Dialog */}
       <Dialog open={showReorderDialog} onOpenChange={setShowReorderDialog}>
