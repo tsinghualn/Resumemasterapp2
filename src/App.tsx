@@ -25,8 +25,9 @@ import { Dashboard } from './components/Dashboard';
 import { SystemStatus } from './components/SystemStatus';
 import { AITestPanel } from './components/AITestPanel';
 import { EmailVerificationInfo } from './components/EmailVerificationInfo';
+import { FeedbackLearningDashboard } from './components/FeedbackLearningDashboard';
 
-type Screen = 'landing' | 'upload' | 'jobdesc' | 'optimize' | 'matchscore' | 'preview' | 'dashboard' | 'parsed';
+type Screen = 'landing' | 'upload' | 'jobdesc' | 'optimize' | 'matchscore' | 'preview' | 'dashboard' | 'parsed' | 'admin-feedback';
 type AuthMode = 'signin' | 'signup';
 
 interface ResumeData {
@@ -818,6 +819,7 @@ CERTIFICATIONS
           onSignIn={handleSignIn}
           onSignUp={handleSignUp}
           onDashboard={handleGoToDashboard}
+          onAdminFeedback={() => setCurrentScreen('admin-feedback')}
           isAuthenticated={isAuthenticated}
           email={currentUser?.email}
           onSignOut={handleSignOut}
@@ -1017,6 +1019,37 @@ CERTIFICATIONS
           onOpenSignIn={handleOpenSignIn}
         />
       </>
+    );
+  }
+
+  // Admin Feedback Learning Dashboard
+  if (currentScreen === 'admin-feedback') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between p-4 border-b bg-white/80 backdrop-blur-sm">
+            <div className="flex items-center gap-4">
+              <Button 
+                variant="ghost" 
+                onClick={() => setCurrentScreen('landing')}
+                className="flex items-center gap-2"
+              >
+                <Home className="w-4 h-4" />
+                Back to Home
+              </Button>
+              <h1 className="text-xl font-bold text-gray-800">Admin: Feedback Analysis</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">{currentUser?.email}</span>
+              <Button variant="outline" size="sm" onClick={handleSignOut}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </div>
+          </div>
+          <FeedbackLearningDashboard />
+        </div>
+      </div>
     );
   }
 

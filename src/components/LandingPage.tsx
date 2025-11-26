@@ -1,11 +1,12 @@
 import { Button } from './ui/button';
-import { FileText, Sparkles, Zap, Shield, TrendingUp, LayoutDashboard, User, Loader2 } from 'lucide-react';
+import { FileText, Sparkles, Zap, Shield, TrendingUp, LayoutDashboard, User, Loader2, Brain } from 'lucide-react';
 
 interface LandingPageProps {
   onGetStarted: (mode: 'upload' | 'scratch') => void;
   onSignIn: () => void;
   onSignUp: () => void;
   onDashboard: () => void;
+  onAdminFeedback?: () => void; // Navigate to admin feedback dashboard
   isAuthenticated?: boolean;
   email?: string;
   onSignOut?: () => void;
@@ -18,6 +19,7 @@ export function LandingPage({
   onSignIn, 
   onSignUp, 
   onDashboard,
+  onAdminFeedback,
   isAuthenticated = false,
   email,
   onSignOut,
@@ -50,6 +52,12 @@ export function LandingPage({
                   <LayoutDashboard className="w-4 h-4 mr-2" />
                   Dashboard
                 </Button>
+                {isAdmin && onAdminFeedback && (
+                  <Button onClick={onAdminFeedback} variant="outline" className="border-purple-300 text-purple-700 hover:bg-purple-50">
+                    <Brain className="w-4 h-4 mr-2" />
+                    AI Feedback
+                  </Button>
+                )}
                 <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
                   <User className="w-4 h-4 text-blue-600" />
                   <span className="font-medium text-gray-700">

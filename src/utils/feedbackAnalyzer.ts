@@ -5,8 +5,8 @@
 
 export interface ParseFeedback {
   section: string;
-  type: 'positive' | 'negative';
-  reason?: string;
+  is_positive: boolean; // Changed from type: 'positive' | 'negative' to match database schema
+  comment?: string; // Changed from reason to match database
   timestamp: number;
 }
 
@@ -36,38 +36,38 @@ export function getFeedbackForSection(section: string): ParseFeedback[] {
  */
 export function getCommonIssues(): { issue: string; count: number }[] {
   const allFeedback = getAllFeedback();
-  const negativeFeedback = allFeedback.filter(f => f.type === 'negative' && f.reason);
+  const negativeFeedback = allFeedback.filter(f => !f.is_positive && f.comment);
   
   // Count similar issues (simple keyword matching)
   const issueCounts: Record<string, number> = {};
   
   negativeFeedback.forEach(f => {
-    if (f.reason) {
-      const lowerReason = f.reason.toLowerCase();
+    if (f.comment) {
+      const lowerComment = f.comment.toLowerCase();
       
       // Categorize by keywords
-      if (lowerReason.includes('email')) {
+      if (lowerComment.includes('email')) {
         issueCounts['email parsing'] = (issueCounts['email parsing'] || 0) + 1;
       }
-      if (lowerReason.includes('phone')) {
+      if (lowerComment.includes('phone')) {
         issueCounts['phone parsing'] = (issueCounts['phone parsing'] || 0) + 1;
       }
-      if (lowerReason.includes('date')) {
+      if (lowerComment.includes('date')) {
         issueCounts['date parsing'] = (issueCounts['date parsing'] || 0) + 1;
       }
-      if (lowerReason.includes('name')) {
+      if (lowerComment.includes('name')) {
         issueCounts['name parsing'] = (issueCounts['name parsing'] || 0) + 1;
       }
-      if (lowerReason.includes('experience') || lowerReason.includes('job')) {
+      if (lowerComment.includes('experience') || lowerComment.includes('job')) {
         issueCounts['experience parsing'] = (issueCounts['experience parsing'] || 0) + 1;
       }
-      if (lowerReason.includes('education') || lowerReason.includes('degree')) {
+      if (lowerComment.includes('education') || lowerComment.includes('degree')) {
         issueCounts['education parsing'] = (issueCounts['education parsing'] || 0) + 1;
       }
-      if (lowerReason.includes('skill')) {
+      if (lowerComment.includes('skill')) {
         issueCounts['skills parsing'] = (issueCounts['skills parsing'] || 0) + 1;
       }
-      if (lowerReason.includes('format') || lowerReason.includes('layout')) {
+      if (lowerComment.includes('format') || lowerComment.includes('layout')) {
         issueCounts['formatting issues'] = (issueCounts['formatting issues'] || 0) + 1;
       }
     }
@@ -120,9 +120,9 @@ export function getFeedbackStats(): {
   successRate: number;
 } {
   const allFeedback = getAllFeedback();
-  const positive = allFeedback.filter(f => f.type === 'positive').length;
-  const negative = allFeedback.filter(f => f.type === 'negative').length;
-  const withReasons = allFeedback.filter(f => f.type === 'negative' && f.reason).length;
+  const positive = allFeedback.filter(f => f.is_positive).length;
+  const negative = allFeedback.filter(f => !f.is_positive).length;
+  const withReasons = allFeedback.filter(f => !f.is_positive && f.comment).length;
   
   return {
     total: allFeedback.length,

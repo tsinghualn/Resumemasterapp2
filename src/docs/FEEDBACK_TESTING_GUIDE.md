@@ -8,7 +8,7 @@
 3. You should see: "Help us improve AI. Parsed correctly? [👍] [👎]"
 4. Click **👍** - Should show "Thank you for your feedback!"
 5. Check localStorage: `JSON.parse(localStorage.getItem('aiParsingFeedback'))`
-6. Should see entry: `{ section: "personalDetails", type: "positive", timestamp: ... }`
+6. Should see entry: `{ section: "personalDetails", is_positive: true, timestamp: ... }`
 
 ### ✅ Test 2: Contact Information Section
 1. Navigate to **Contact Information**
@@ -19,7 +19,7 @@
 6. Enter: "Email was not detected"
 7. Submit
 8. Should show: "Thank you for helping us improve!"
-9. Check localStorage - should see entry with reason
+9. Check localStorage - should see entry with comment field
 
 ### ✅ Test 3: Professional Summary Section
 1. Navigate to **Professional Summary**
@@ -93,9 +93,9 @@ Open browser console (F12) and run:
 const feedback = JSON.parse(localStorage.getItem('aiParsingFeedback') || '[]');
 console.table(feedback);
 
-// Count feedback by type
-const positive = feedback.filter(f => f.type === 'positive').length;
-const negative = feedback.filter(f => f.type === 'negative').length;
+// Count feedback by is_positive
+const positive = feedback.filter(f => f.is_positive).length;
+const negative = feedback.filter(f => !f.is_positive).length;
 console.log(`Positive: ${positive}, Negative: ${negative}`);
 
 // View feedback by section
@@ -112,50 +112,50 @@ console.table(bySect);
 [
   {
     "section": "personalDetails",
-    "type": "positive",
+    "is_positive": true,
     "timestamp": 1732483200000
   },
   {
     "section": "contact",
-    "type": "negative",
-    "reason": "Email was not detected correctly",
+    "is_positive": false,
+    "comment": "Email was not detected correctly",
     "timestamp": 1732483201000
   },
   {
     "section": "summary",
-    "type": "positive",
+    "is_positive": true,
     "timestamp": 1732483202000
   },
   {
     "section": "experience-exp-1732483100123",
-    "type": "negative",
-    "reason": "Job title was parsed incorrectly",
+    "is_positive": false,
+    "comment": "Job title was parsed incorrectly",
     "timestamp": 1732483203000
   },
   {
     "section": "experience-exp-1732483100456",
-    "type": "positive",
+    "is_positive": true,
     "timestamp": 1732483204000
   },
   {
     "section": "education-edu-1732483100789",
-    "type": "positive",
+    "is_positive": true,
     "timestamp": 1732483205000
   },
   {
     "section": "skills",
-    "type": "positive",
+    "is_positive": true,
     "timestamp": 1732483206000
   },
   {
     "section": "links",
-    "type": "positive",
+    "is_positive": true,
     "timestamp": 1732483207000
   },
   {
     "section": "custom-1732483150000-0",
-    "type": "negative",
-    "reason": "Awards section was not parsed correctly",
+    "is_positive": false,
+    "comment": "Awards section was not parsed correctly",
     "timestamp": 1732483208000
   }
 ]

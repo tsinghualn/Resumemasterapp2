@@ -158,7 +158,7 @@ export function FeedbackViewer() {
                 <div 
                   key={index} 
                   className={`p-4 rounded border ${
-                    item.type === 'positive' 
+                    item.is_positive 
                       ? 'bg-green-50 border-green-200' 
                       : 'bg-red-50 border-red-200'
                   }`}
@@ -166,19 +166,19 @@ export function FeedbackViewer() {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                        item.type === 'positive' 
+                        item.is_positive 
                           ? 'bg-green-200 text-green-800' 
                           : 'bg-red-200 text-red-800'
                       }`}>
-                        {item.type}
+                        {item.is_positive ? 'positive' : 'negative'}
                       </span>
                       <span className="font-medium">{item.section}</span>
                     </div>
                     <span className="text-xs text-gray-500">{formatDate(item.timestamp)}</span>
                   </div>
-                  {item.reason && (
+                  {item.comment && (
                     <div className="text-sm text-gray-700 mt-2">
-                      <strong>Reason:</strong> {item.reason}
+                      <strong>Comment:</strong> {item.comment}
                     </div>
                   )}
                 </div>

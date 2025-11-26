@@ -132,21 +132,104 @@ Respond with JSON in this format:
   return analysis;
 }
 
+// Store analysis in the new relational tables
+async function storeAnalysisInTables(
+  analysisDate: string,
+  feedbackCount: number,
+  commentsAnalyzed: number,
+  analysis: any,
+  keywordCategorization: any[]
+): Promise<string | null> {
+  try {
+    // 1. Insert into feedback_analyses table
+    const { data: analysisRecord, error: analysisError } = await supabase
+      .from('feedback_analyses')
+      .upsert({
+        analysis_date: analysisDate,
+        feedback_count: feedbackCount,
+        comments_analyzed: commentsAnalyzed,
+        summary: analysis.summary || '',
+        status: 'pending_review'
+      }, {
+        onConflict: 'analysis_date'
+      })
+      .select('id')
+      .single();
+
+    if (analysisError) {
+      console.error('❌ Error storing analysis:', analysisError);
+      return null;
+    }
+
+    const analysisId = analysisRecord.id;
+    console.log('✅ Analysis stored with ID:', analysisId);
+
+    // 2. Delete existing common issues and recommendations for this analysis (in case of re-run)
+    await supabase
+      .from('analysis_common_issues')
+      .delete()
+      .eq('analysis_id', analysisId);
+
+    await supabase
+      .from('analysis_recommendations')
+      .delete()
+      .eq('analysis_id', analysisId);
+
+    // 3. Insert common issues
+    const commonIssues = analysis.common_issues || [];
+    if (commonIssues.length > 0) {
+      const issuesToInsert = commonIssues.map((issue: any) => ({
+        analysis_id: analysisId,
+        category: issue.category,
+        count: issue.count,
+        severity: issue.severity || 'medium',
+        keywords: issue.keywords || [],
+        examples: issue.examples || []
+      }));
+
+      const { error: issuesError } = await supabase
+        .from('analysis_common_issues')
+        .insert(issuesToInsert);
+
+      if (issuesError) {
+        console.error('❌ Error storing common issues:', issuesError);
+      } else {
+        console.log(`✅ Stored ${issuesToInsert.length} common issues`);
+      }
+    }
+
+    // 4. Insert recommendations
+    const recommendations = analysis.recommendations || [];
+    if (recommendations.length > 0) {
+      const recsToInsert = recommendations.map((rec: any) => ({
+        analysis_id: analysisId,
+        issue: rec.issue,
+        current_problem: rec.current_problem,
+        suggested_fix: rec.suggested_fix
+      }));
+
+      const { error: recsError } = await supabase
+        .from('analysis_recommendations')
+        .insert(recsToInsert);
+
+      if (recsError) {
+        console.error('❌ Error storing recommendations:', recsError);
+      } else {
+        console.log(`✅ Stored ${recsToInsert.length} recommendations`);
+      }
+    }
+
+    return analysisId;
+  } catch (error) {
+    console.error('❌ Error in storeAnalysisInTables:', error);
+    return null;
+  }
+}
+
 // Main cron job handler
 app.post('/analyze-feedback-cron', async (c) => {
   try {
     console.log('🕐 Starting daily feedback analysis at', new Date().toISOString());
-
-    // Set running status flag for frontend to display "Updating" message
-    await supabase
-      .from('kv_store_bc1c5df9')
-      .upsert({
-        key: 'feedback_analysis_running',
-        value: {
-          is_running: true,
-          started_at: new Date().toISOString()
-        }
-      });
 
     // Get feedback from the last 24 hours
     const yesterday = new Date();
@@ -167,17 +250,6 @@ app.post('/analyze-feedback-cron', async (c) => {
     if (!feedbackData || feedbackData.length === 0) {
       console.log('ℹ️ No negative feedback in the last 24 hours');
       
-      // Clear running status
-      await supabase
-        .from('kv_store_bc1c5df9')
-        .upsert({
-          key: 'feedback_analysis_running',
-          value: {
-            is_running: false,
-            completed_at: new Date().toISOString()
-          }
-        });
-      
       return c.json({ 
         success: true, 
         message: 'No negative feedback to analyze',
@@ -194,17 +266,6 @@ app.post('/analyze-feedback-cron', async (c) => {
 
     if (comments.length === 0) {
       console.log('ℹ️ No comments in negative feedback (all thumbs down without text)');
-      
-      // Clear running status
-      await supabase
-        .from('kv_store_bc1c5df9')
-        .upsert({
-          key: 'feedback_analysis_running',
-          value: {
-            is_running: false,
-            completed_at: new Date().toISOString()
-          }
-        });
       
       return c.json({ 
         success: true, 
@@ -235,48 +296,25 @@ app.post('/analyze-feedback-cron', async (c) => {
       examples: items.slice(0, 3) // First 3 examples
     }));
 
-    // Store analysis results in database (using a new table or KV store)
-    const analysisRecord = {
-      analysis_date: new Date().toISOString(),
-      feedback_count: feedbackData.length,
-      comments_analyzed: comments.length,
-      keyword_categorization: keywordCategorization, // Add keyword-based analysis
-      common_issues: analysis.common_issues || [],
-      recommendations: analysis.recommendations || [],
-      updated_prompt_sections: analysis.updated_prompt_sections || {},
-      summary: analysis.summary || '',
-      raw_analysis: analysis,
-      status: 'pending_review', // Admin needs to review before applying
-    };
+    // Store in the new relational tables
+    const analysisDate = new Date().toISOString().split('T')[0];
+    const analysisId = await storeAnalysisInTables(
+      analysisDate,
+      feedbackData.length,
+      comments.length,
+      analysis,
+      keywordCategorization
+    );
 
-    // Store in KV store for now (can be moved to dedicated table later)
-    const analysisId = `feedback_analysis_${new Date().toISOString().split('T')[0]}`;
-    
-    // Using the existing kv_store approach
-    const { error: storeError } = await supabase
-      .from('kv_store_bc1c5df9')
-      .upsert({
-        key: analysisId,
-        value: analysisRecord
-      });
-
-    if (storeError) {
-      console.error('❌ Error storing analysis:', storeError);
-      // Continue anyway - we have the analysis
+    if (!analysisId) {
+      console.error('❌ Failed to store analysis in tables');
+      return c.json({ 
+        error: 'Failed to store analysis',
+        details: 'Database insert failed'
+      }, 500);
     }
 
     console.log('💾 Analysis stored with ID:', analysisId);
-
-    // Clear running status flag (analysis complete)
-    await supabase
-      .from('kv_store_bc1c5df9')
-      .upsert({
-        key: 'feedback_analysis_running',
-        value: {
-          is_running: false,
-          completed_at: new Date().toISOString()
-        }
-      });
 
     // Return the analysis
     return c.json({
@@ -290,19 +328,6 @@ app.post('/analyze-feedback-cron', async (c) => {
 
   } catch (error) {
     console.error('❌ Error in feedback analysis cron:', error);
-    
-    // Clear running status flag even on error
-    await supabase
-      .from('kv_store_bc1c5df9')
-      .upsert({
-        key: 'feedback_analysis_running',
-        value: {
-          is_running: false,
-          error: true,
-          error_message: error instanceof Error ? error.message : 'Unknown error',
-          completed_at: new Date().toISOString()
-        }
-      });
     
     return c.json({
       error: 'Failed to analyze feedback',
@@ -331,17 +356,32 @@ app.get('/health', (c) => {
 // Get current running status (for frontend to poll)
 app.get('/status', async (c) => {
   try {
+    // Check if there's a recent analysis (within last hour) that indicates running
+    const oneHourAgo = new Date();
+    oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+
     const { data, error } = await supabase
-      .from('kv_store_bc1c5df9')
-      .select('value')
-      .eq('key', 'feedback_analysis_running')
-      .single();
+      .from('feedback_analyses')
+      .select('created_at, status')
+      .gte('created_at', oneHourAgo.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1);
     
-    if (error || !data) {
+    if (error || !data || data.length === 0) {
       return c.json({ is_running: false });
     }
     
-    return c.json(data.value);
+    // If there's a very recent analysis (within last 5 minutes), consider it might be running
+    const fiveMinutesAgo = new Date();
+    fiveMinutesAgo.setMinutes(fiveMinutesAgo.getMinutes() - 5);
+    
+    const isRecent = new Date(data[0].created_at) > fiveMinutesAgo;
+    
+    return c.json({ 
+      is_running: false, // Analysis is synchronous, so it's never "running" for long
+      last_analysis: data[0].created_at,
+      status: data[0].status
+    });
   } catch (error) {
     console.error('Error fetching status:', error);
     return c.json({ is_running: false });
