@@ -1,0 +1,26 @@
+              {/* Job Match Score Button - Only show when job description is provided */}
+              {jobDescription && (
+                <div className="relative mt-2">
+                  <button
+                    onClick={() => setShowJobMatchScore(true)}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-md pr-12"
+                  >
+                    <Sparkles className="w-4 h-4 flex-shrink-0" />
+                    <span className="text-sm flex-1 text-left">Analyze job match with our AI HR</span>
+                  </button>
+                  {/* Regenerate button - positioned on the right */}
+                  {cachedJobMatchScore && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setForceRegenerateMatch(true);
+                        setShowJobMatchScore(true);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/20 rounded transition-colors"
+                      title="Regenerate job match score"
+                    >
+                      <RefreshCw className="w-4 h-4 text-white" />
+                    </button>
+                  )}
+                </div>
+              )}

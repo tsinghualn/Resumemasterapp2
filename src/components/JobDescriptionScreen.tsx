@@ -3,8 +3,10 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
-import { ArrowLeft, ArrowRight, FileText, Link as LinkIcon, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FileText, Link as LinkIcon, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
+import { Input } from './ui/input';
+import { projectId, publicAnonKey } from '../utils/supabase/info.tsx';
 
 interface JobDescriptionScreenProps {
   onBack: () => void;
@@ -18,11 +20,76 @@ export function JobDescriptionScreen({
   initialValue = '' 
 }: JobDescriptionScreenProps) {
   const [jobDescription, setJobDescription] = useState(initialValue);
+  const [linkedInUrl, setLinkedInUrl] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
 
-  const handleImportFromLinkedIn = () => {
-    toast.info('LinkedIn import feature coming soon!', {
-      description: 'This will allow you to import job descriptions directly from LinkedIn.'
-    });
+  const handleImportFromLinkedIn = async () => {
+    if (!linkedInUrl.trim()) {
+      toast.error('Please enter a URL');
+      return;
+    }
+    
+    setIsImporting(true);
+    
+    try {
+      console.log('🔄 Starting import from URL:', linkedInUrl);
+      
+      // Call the backend endpoint to fetch job description
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-bc1c5df9/import-job`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`
+          },
+          body: JSON.stringify({ url: linkedInUrl })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        
+        // Check if this is a LinkedIn authentication error
+        if (errorData.requiresManualCopy) {
+          toast.error('LinkedIn Import Blocked', {
+            description: errorData.message || 'Please copy the job description manually from your browser.'
+          });
+          return;
+        }
+        
+        throw new Error(errorData.error || 'Failed to fetch job description');
+      }
+
+      const data = await response.json();
+      console.log('✅ Received job description from server:', {
+        length: data.jobDescription?.length,
+        source: data.source,
+        method: data.method
+      });
+
+      if (data.jobDescription) {
+        setJobDescription(data.jobDescription);
+        console.log('✅ Job description state updated');
+        
+        // Clear the URL input
+        setLinkedInUrl('');
+        
+        toast.success('Job description imported successfully!', {
+          description: `Imported from ${data.source}`
+        });
+      } else {
+        throw new Error('No job description returned from server');
+      }
+      
+    } catch (error) {
+      console.error('❌ Import error:', error);
+      toast.error('Failed to import job description', {
+        description: error instanceof Error ? error.message : 'Please try again or paste the job description manually.'
+      });
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleUseSample = () => {
@@ -64,7 +131,14 @@ Preferred Qualifications:
     }
   };
 
-  const wordCount = jobDescription.trim().split(/\s+/).filter(w => w).length;
+  const wordCount = jobDescription.trim() ? jobDescription.trim().split(/\s+/).filter(w => w).length : 0;
+
+  console.log('📊 JobDescriptionScreen state:', {
+    jobDescriptionLength: jobDescription.length,
+    wordCount,
+    linkedInUrl,
+    isImporting
+  });
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -111,6 +185,64 @@ Preferred Qualifications:
           </div>
         </div>
 
+        {/* LinkedIn Import Section - New Layout */}
+        <Card className="p-6 mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <LinkIcon className="w-4 h-4 text-blue-600" />
+            <h3 className="text-lg">Import from Job URL</h3>
+          </div>
+          <p className="text-sm text-gray-600 mb-3">
+            Try to automatically import the job description from a URL
+          </p>
+          
+          {/* Warning about LinkedIn */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+            <div className="space-y-2">
+              <p className="text-sm text-amber-800">
+                <strong>⚠️ Automatic import may not work for all sites</strong>
+              </p>
+              <p className="text-sm text-amber-700">
+                Sites like LinkedIn, Google Careers, and Indeed often use JavaScript to load content or require login. If import fails, follow these steps:
+              </p>
+              <ol className="text-sm text-amber-700 ml-4 space-y-1">
+                <li>1. Open the job URL in your browser</li>
+                <li>2. Select and copy the entire job description</li>
+                <li>3. Paste it in the "Enter Job Description" field below</li>
+              </ol>
+            </div>
+          </div>
+          
+          <div className="flex gap-2">
+            <Input
+              type="url"
+              placeholder="Paste the job URL here to try automatic import..."
+              value={linkedInUrl}
+              onChange={(e) => setLinkedInUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isImporting) {
+                  handleImportFromLinkedIn();
+                }
+              }}
+              disabled={isImporting}
+              className="flex-1"
+            />
+            <Button
+              onClick={handleImportFromLinkedIn}
+              disabled={!linkedInUrl.trim() || isImporting}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-8"
+            >
+              {isImporting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                'Try Import'
+              )}
+            </Button>
+          </div>
+        </Card>
+
         {/* Main Content */}
         <Card className="p-6">
           <div className="flex items-center justify-between mb-4">
@@ -136,15 +268,6 @@ The more details you provide, the better we can optimize your resume!"
           />
 
           <div className="flex gap-2">
-            <Button
-              onClick={handleImportFromLinkedIn}
-              variant="outline"
-              className="flex-1"
-            >
-              <LinkIcon className="w-4 h-4 mr-2" />
-              Import from LinkedIn
-            </Button>
-            
             <Button
               onClick={handleUseSample}
               variant="outline"

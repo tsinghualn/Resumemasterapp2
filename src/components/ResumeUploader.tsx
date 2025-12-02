@@ -734,6 +734,22 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
               </div>
             )}
 
+            {/* Finalizing Progress */}
+            {isProcessing && progressStage === 'finalizing' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-green-700 font-medium">
+                    ✨ Finalizing your resume...
+                  </span>
+                  <span className="text-green-900 font-semibold">{progress}%</span>
+                </div>
+                <Progress value={progress} className="h-3 bg-green-100" />
+                <p className="text-xs text-green-600 mt-2">
+                  Almost done!
+                </p>
+              </div>
+            )}
+
             {/* Parsing Complete */}
             {isComplete && (
               <div className="space-y-4">

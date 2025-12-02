@@ -71,7 +71,9 @@ import {
   Info,
   Pencil,
   PanelRightClose,
-  PanelRightOpen
+  PanelRightOpen,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { apiClient } from '../utils/api';
@@ -85,6 +87,8 @@ import {
 } from './ui/dialog';
 import { PhotoUploadDialog } from './PhotoUploadDialog';
 import { AddSectionDialog } from './AddSectionDialog';
+import { JobMatchScore } from './JobMatchScore';
+import { AIHRSuggestions } from './AIHRSuggestions';
 
 interface ResumeData {
   personalDetails: {
@@ -190,6 +194,16 @@ export function AIRewritePanel({
   const [editingSectionName, setEditingSectionName] = useState<string>('');
   const [hoveredSectionId, setHoveredSectionId] = useState<string | null>(null);
   
+  // AI HR Suggestions state
+  const [showAIHRSuggestions, setShowAIHRSuggestions] = useState(false);
+  const [cachedAISuggestions, setCachedAISuggestions] = useState<any>(null);
+  const [forceRegenerateAI, setForceRegenerateAI] = useState(false);
+  
+  // Job Match Score state
+  const [showJobMatchScore, setShowJobMatchScore] = useState(false);
+  const [cachedJobMatchScore, setCachedJobMatchScore] = useState<any>(null);
+  const [forceRegenerateMatch, setForceRegenerateMatch] = useState(false);
+  
   // AI Improve dialog state
   const [improveDialogOpen, setImproveDialogOpen] = useState(false);
   
@@ -201,6 +215,15 @@ export function AIRewritePanel({
   const [improveDialogSectionType, setImproveDialogSectionType] = useState<'summary' | 'experience' | 'education' | 'skills' | 'custom'>('summary');
   const [improveDialogIsList, setImproveDialogIsList] = useState(false);
   const [improveDialogCallback, setImproveDialogCallback] = useState<((content: string) => void) | null>(null);
+  
+  // Loading state for AI summary generation
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  
+  // Track original content before AI optimization for "Return to original" button
+  const [originalSummary, setOriginalSummary] = useState<string>('');
+  const [originalExperience, setOriginalExperience] = useState<Record<string, string>>({});
+  const [originalEducation, setOriginalEducation] = useState<Record<string, string>>({});
+  const [originalCustomSections, setOriginalCustomSections] = useState<Record<string, string>>({});
   
   const [resumeData, setResumeData] = useState<ResumeData>({
     personalDetails: {
@@ -235,7 +258,6 @@ export function AIRewritePanel({
     { id: 'experience', type: 'experience', label: 'Employment History', visible: true },
     { id: 'education', type: 'education', label: 'Education', visible: true },
     { id: 'skills', type: 'skills', label: 'Skills', visible: true },
-    { id: 'links', type: 'links', label: 'Links', visible: true },
   ]);
 
   // Parse resume data on mount
@@ -243,7 +265,56 @@ export function AIRewritePanel({
     if (cachedParsedData) {
       parseResumeData(cachedParsedData);
     } else {
-      parseResumeFromText(originalResume);
+      // Check if this is a blank template (starting from scratch)
+      const isBlankTemplate = !originalResume.trim() || 
+        (originalResume.includes('YOUR NAME') && 
+         originalResume.includes('[Add your professional summary here]') &&
+         originalResume.includes('[Add your work experience here]'));
+      
+      if (isBlankTemplate) {
+        // Starting from scratch - initialize with empty data, don't parse
+        const emptyData: ResumeData = {
+          personalDetails: {
+            firstName: '',
+            lastName: '',
+            jobTitle: '',
+            nationality: '',
+            driversLicense: '',
+            birthDate: '',
+            photoUrl: ''
+          },
+          contact: {
+            email: '',
+            phone: '',
+            address: '',
+            linkedin: '',
+            website: ''
+          },
+          summary: '',
+          experience: [],
+          education: [],
+          skills: [],
+          skillsRichText: '',
+          links: [],
+          customSections: []
+        };
+        
+        setResumeData(emptyData);
+        
+        // Set up default 6 sections without parsing
+        const defaultSections: SectionOrder[] = [
+          { id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true },
+          { id: 'contact', type: 'contact', label: 'Contact Information', visible: true },
+          { id: 'summary', type: 'summary', label: 'Professional Summary', visible: true },
+          { id: 'experience', type: 'experience', label: 'Employment History', visible: true },
+          { id: 'education', type: 'education', label: 'Education', visible: true },
+          { id: 'skills', type: 'skills', label: 'Skills', visible: true },
+        ];
+        setSectionOrder(defaultSections);
+      } else {
+        // User uploaded a resume - parse it
+        parseResumeFromText(originalResume);
+      }
     }
   }, [originalResume, cachedParsedData]);
 
@@ -384,33 +455,13 @@ export function AIRewritePanel({
   const updateSectionOrderFromData = (parsed: ResumeData, originalData: any) => {
     const newSectionOrder: SectionOrder[] = [];
     
-    // Personal Details - always show if name exists
-    if (parsed.personalDetails.firstName || parsed.personalDetails.lastName || originalData.name) {
-      newSectionOrder.push({ id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true });
-    }
-    
-    // Contact - show if any contact info exists
-    if (parsed.contact.email || parsed.contact.phone || parsed.contact.address || parsed.contact.linkedin || parsed.contact.website || originalData.contact) {
-      newSectionOrder.push({ id: 'contact', type: 'contact', label: 'Contact Information', visible: true });
-    }
-    
-    // Summary - always show (can be generated by AI even if empty)
+    // Always show these 6 default sections regardless of content
+    newSectionOrder.push({ id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true });
+    newSectionOrder.push({ id: 'contact', type: 'contact', label: 'Contact Information', visible: true });
     newSectionOrder.push({ id: 'summary', type: 'summary', label: originalData.summaryTitle || 'Professional Summary', visible: true });
-    
-    // Experience - only show if experience exists
-    if (parsed.experience && parsed.experience.length > 0) {
-      newSectionOrder.push({ id: 'experience', type: 'experience', label: originalData.experienceTitle || 'Employment History', visible: true });
-    }
-    
-    // Education - only show if education exists
-    if (parsed.education && parsed.education.length > 0) {
-      newSectionOrder.push({ id: 'education', type: 'education', label: originalData.educationTitle || 'Education', visible: true });
-    }
-    
-    // Skills - only show if skills exist
-    if ((parsed.skills && parsed.skills.length > 0) || (parsed.skillsRichText && parsed.skillsRichText.trim())) {
-      newSectionOrder.push({ id: 'skills', type: 'skills', label: originalData.skillsTitle || 'Skills', visible: true });
-    }
+    newSectionOrder.push({ id: 'experience', type: 'experience', label: originalData.experienceTitle || 'Employment History', visible: true });
+    newSectionOrder.push({ id: 'education', type: 'education', label: originalData.educationTitle || 'Education', visible: true });
+    newSectionOrder.push({ id: 'skills', type: 'skills', label: originalData.skillsTitle || 'Skills', visible: true });
     
     // Links - only show if links exist
     if (parsed.links && parsed.links.length > 0) {
@@ -476,40 +527,23 @@ export function AIRewritePanel({
     setResumeData(parsed);
     
     // Update section order based on what sections have content (for text parsing)
-    updateSectionOrderFromParsedData(parsed);
+    // Skip updating section order if starting from scratch (empty text)
+    if (text.trim()) {
+      updateSectionOrderFromParsedData(parsed);
+    }
   };
   
   // Update section order for text-parsed data
   const updateSectionOrderFromParsedData = (parsed: ResumeData) => {
     const newSectionOrder: SectionOrder[] = [];
     
-    // Personal Details - always show if name exists
-    if (parsed.personalDetails.firstName || parsed.personalDetails.lastName) {
-      newSectionOrder.push({ id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true });
-    }
-    
-    // Contact - show if any contact info exists
-    if (parsed.contact.email || parsed.contact.phone || parsed.contact.address || parsed.contact.linkedin || parsed.contact.website) {
-      newSectionOrder.push({ id: 'contact', type: 'contact', label: 'Contact Information', visible: true });
-    }
-    
-    // Summary - always show (can be generated by AI even if empty)
+    // Always show these 6 default sections regardless of content
+    newSectionOrder.push({ id: 'personalDetails', type: 'personalDetails', label: 'Personal Details', visible: true });
+    newSectionOrder.push({ id: 'contact', type: 'contact', label: 'Contact Information', visible: true });
     newSectionOrder.push({ id: 'summary', type: 'summary', label: 'Professional Summary', visible: true });
-    
-    // Experience - only show if experience exists
-    if (parsed.experience && parsed.experience.length > 0) {
-      newSectionOrder.push({ id: 'experience', type: 'experience', label: 'Employment History', visible: true });
-    }
-    
-    // Education - only show if education exists
-    if (parsed.education && parsed.education.length > 0) {
-      newSectionOrder.push({ id: 'education', type: 'education', label: 'Education', visible: true });
-    }
-    
-    // Skills - only show if skills exist
-    if ((parsed.skills && parsed.skills.length > 0) || (parsed.skillsRichText && parsed.skillsRichText.trim())) {
-      newSectionOrder.push({ id: 'skills', type: 'skills', label: 'Skills', visible: true });
-    }
+    newSectionOrder.push({ id: 'experience', type: 'experience', label: 'Employment History', visible: true });
+    newSectionOrder.push({ id: 'education', type: 'education', label: 'Education', visible: true });
+    newSectionOrder.push({ id: 'skills', type: 'skills', label: 'Skills', visible: true });
     
     // Links - only show if links exist
     if (parsed.links && parsed.links.length > 0) {
@@ -955,6 +989,84 @@ export function AIRewritePanel({
     }));
   };
 
+  // Helper functions for "Return to original" functionality
+  const saveOriginalSummary = () => {
+    if (!originalSummary) {
+      setOriginalSummary(resumeData.summary);
+    }
+  };
+
+  const saveOriginalExperience = (id: string) => {
+    if (!originalExperience[id]) {
+      const exp = resumeData.experience.find(e => e.id === id);
+      if (exp) {
+        setOriginalExperience(prev => ({ ...prev, [id]: exp.description }));
+      }
+    }
+  };
+
+  const saveOriginalEducation = (id: string) => {
+    if (!originalEducation[id]) {
+      const edu = resumeData.education.find(e => e.id === id);
+      if (edu) {
+        setOriginalEducation(prev => ({ ...prev, [id]: edu.details }));
+      }
+    }
+  };
+
+  const saveOriginalCustomSection = (id: string) => {
+    if (!originalCustomSections[id]) {
+      const section = resumeData.customSections.find(s => s.id === id);
+      if (section) {
+        setOriginalCustomSections(prev => ({ ...prev, [id]: section.content }));
+      }
+    }
+  };
+
+  const restoreOriginalSummary = () => {
+    if (originalSummary) {
+      updateSummary(originalSummary);
+      setOriginalSummary('');
+      toast.success('Restored to original content');
+    }
+  };
+
+  const restoreOriginalExperience = (id: string) => {
+    if (originalExperience[id]) {
+      updateExperience(id, 'description', originalExperience[id]);
+      setOriginalExperience(prev => {
+        const newState = { ...prev };
+        delete newState[id];
+        return newState;
+      });
+      toast.success('Restored to original content');
+    }
+  };
+
+  const restoreOriginalEducation = (id: string) => {
+    if (originalEducation[id]) {
+      updateEducation(id, 'details', originalEducation[id]);
+      setOriginalEducation(prev => {
+        const newState = { ...prev };
+        delete newState[id];
+        return newState;
+      });
+      toast.success('Restored to original content');
+    }
+  };
+
+  const restoreOriginalCustomSection = (id: string) => {
+    if (originalCustomSections[id]) {
+      updateCustomSection(id, 'content', originalCustomSections[id]);
+      setOriginalCustomSections(prev => {
+        const newState = { ...prev };
+        delete newState[id];
+        return newState;
+      });
+      toast.success('Restored to original content');
+    }
+  };
+
   // Links handlers
   const addLink = () => {
     const newLink = {
@@ -1240,8 +1352,20 @@ export function AIRewritePanel({
     content: string,
     sectionType: 'summary' | 'experience' | 'education' | 'skills' | 'custom',
     isList: boolean,
-    callback: (improvedContent: string) => void
+    callback: (improvedContent: string) => void,
+    sectionId?: string // Optional section ID for tracking original content
   ) => {
+    // Save original content before AI optimization
+    if (sectionType === 'summary') {
+      saveOriginalSummary();
+    } else if (sectionType === 'experience' && sectionId) {
+      saveOriginalExperience(sectionId);
+    } else if (sectionType === 'education' && sectionId) {
+      saveOriginalEducation(sectionId);
+    } else if (sectionType === 'custom' && sectionId) {
+      saveOriginalCustomSection(sectionId);
+    }
+    
     setImproveDialogContent(content);
     setImproveDialogSectionType(sectionType);
     setImproveDialogIsList(isList);
@@ -1251,6 +1375,11 @@ export function AIRewritePanel({
 
   // Generate professional summary from resume content
   const generateSummaryFromResume = async () => {
+    setIsGeneratingSummary(true);
+    
+    // Save original summary before generating new one
+    saveOriginalSummary();
+    
     try {
       // Build context from resume data
       const resumeContext = buildResumeContext();
@@ -1284,6 +1413,8 @@ export function AIRewritePanel({
     } catch (error) {
       console.error('Error generating summary:', error);
       toast.error('Failed to generate summary');
+    } finally {
+      setIsGeneratingSummary(false);
     }
   };
 
@@ -2008,6 +2139,60 @@ export function AIRewritePanel({
                 <Plus className="w-4 h-4" />
                 <span className="text-sm">Additional Section</span>
               </button>
+              
+              {/* AI HR Suggestions Button - Only show when NO job description */}
+              {!jobDescription && (
+                <div className="relative mt-2">
+                  <button
+                    onClick={() => setShowAIHRSuggestions(true)}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-md pr-12"
+                  >
+                    <Sparkles className="w-4 h-4 flex-shrink-0" />
+                    <span className="text-sm flex-1 text-left">Get AI HR suggestions</span>
+                  </button>
+                  {/* Regenerate button - positioned on the right */}
+                  {cachedAISuggestions && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setForceRegenerateAI(true);
+                        setShowAIHRSuggestions(true);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/20 rounded transition-colors"
+                      title="Regenerate AI suggestions"
+                    >
+                      <RefreshCw className="w-4 h-4 text-white" />
+                    </button>
+                  )}
+                </div>
+              )}
+              
+              {/* Job Match Score Button - Only show when job description is provided */}
+              {jobDescription && (
+                <div className="relative mt-2">
+                  <button
+                    onClick={() => setShowJobMatchScore(true)}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-md pr-12"
+                  >
+                    <Sparkles className="w-4 h-4 flex-shrink-0" />
+                    <span className="text-sm flex-1 text-left">Analyze job match with our AI HR</span>
+                  </button>
+                  {/* Regenerate button - positioned on the right */}
+                  {cachedJobMatchScore && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setForceRegenerateMatch(true);
+                        setShowJobMatchScore(true);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/20 rounded transition-colors"
+                      title="Regenerate job match score"
+                    >
+                      <RefreshCw className="w-4 h-4 text-white" />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </ScrollArea>
         </div>
@@ -2036,7 +2221,7 @@ export function AIRewritePanel({
                 )}
               </Button>
             </div>
-            
+
             <Card className="p-8">
               {/* Personal Details Section */}
               {currentSection === 'personalDetails' && (
@@ -2056,7 +2241,7 @@ export function AIRewritePanel({
                         id="firstName"
                         value={resumeData.personalDetails.firstName}
                         onChange={(e) => updatePersonalDetails('firstName', e.target.value)}
-                        placeholder="First name"
+                        placeholder="e.g., John"
                       />
                     </div>
                     <div>
@@ -2065,7 +2250,7 @@ export function AIRewritePanel({
                         id="lastName"
                         value={resumeData.personalDetails.lastName}
                         onChange={(e) => updatePersonalDetails('lastName', e.target.value)}
-                        placeholder="Last name"
+                        placeholder="e.g., Smith"
                       />
                     </div>
                   </div>
@@ -2076,7 +2261,7 @@ export function AIRewritePanel({
                       id="jobTitle"
                       value={resumeData.personalDetails.jobTitle}
                       onChange={(e) => updatePersonalDetails('jobTitle', e.target.value)}
-                      placeholder="Product Designer"
+                      placeholder="e.g., Product Designer"
                     />
                   </div>
 
@@ -2134,7 +2319,7 @@ export function AIRewritePanel({
                             id="nationality"
                             value={resumeData.personalDetails.nationality}
                             onChange={(e) => updatePersonalDetails('nationality', e.target.value)}
-                            placeholder="American"
+                            placeholder="e.g., American"
                           />
                         </div>
                         <div>
@@ -2143,7 +2328,7 @@ export function AIRewritePanel({
                             id="driversLicense"
                             value={resumeData.personalDetails.driversLicense}
                             onChange={(e) => updatePersonalDetails('driversLicense', e.target.value)}
-                            placeholder="D74837465"
+                            placeholder="e.g., D74837465"
                           />
                         </div>
                       </div>
@@ -2153,7 +2338,7 @@ export function AIRewritePanel({
                           id="birthDate"
                           value={resumeData.personalDetails.birthDate}
                           onChange={(e) => updatePersonalDetails('birthDate', e.target.value)}
-                          placeholder="03 Feb 1996"
+                          placeholder="e.g., 03 Feb 1996"
                         />
                       </div>
                     </div>
@@ -2186,7 +2371,7 @@ export function AIRewritePanel({
                       type="email"
                       value={resumeData.contact.email}
                       onChange={(e) => updateContact('email', e.target.value)}
-                      placeholder="your.email@example.com"
+                      placeholder="e.g., john.doe@email.com"
                     />
                   </div>
 
@@ -2197,7 +2382,7 @@ export function AIRewritePanel({
                       type="tel"
                       value={resumeData.contact.phone}
                       onChange={(e) => updateContact('phone', e.target.value)}
-                      placeholder="(555) 123-4567"
+                      placeholder="e.g., (555) 123-4567"
                     />
                   </div>
 
@@ -2207,7 +2392,7 @@ export function AIRewritePanel({
                       id="address"
                       value={resumeData.contact.address}
                       onChange={(e) => updateContact('address', e.target.value)}
-                      placeholder="City, State"
+                      placeholder="e.g., San Francisco, CA"
                     />
                   </div>
 
@@ -2217,7 +2402,7 @@ export function AIRewritePanel({
                       id="linkedin"
                       value={resumeData.contact.linkedin}
                       onChange={(e) => updateContact('linkedin', e.target.value)}
-                      placeholder="linkedin.com/in/yourname"
+                      placeholder="e.g., linkedin.com/in/johndoe"
                     />
                   </div>
 
@@ -2227,7 +2412,7 @@ export function AIRewritePanel({
                       id="website"
                       value={resumeData.contact.website}
                       onChange={(e) => updateContact('website', e.target.value)}
-                      placeholder="www.yourwebsite.com"
+                      placeholder="e.g., www.johndoe.com"
                     />
                   </div>
                   
@@ -2254,36 +2439,57 @@ export function AIRewritePanel({
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <Label htmlFor="summary">Summary</Label>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                        onClick={() => {
-                          if (industryTone && rewriteStyle) {
-                            // Generate summary from entire resume if empty, otherwise improve existing
-                            if (!resumeData.summary || !resumeData.summary.trim()) {
-                              generateSummaryFromResume();
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                          onClick={() => {
+                            if (industryTone && rewriteStyle) {
+                              // Generate summary from entire resume if empty, otherwise improve existing
+                              if (!resumeData.summary || !resumeData.summary.trim()) {
+                                generateSummaryFromResume();
+                              } else {
+                                openImproveDialog(
+                                  resumeData.summary,
+                                  'summary',
+                                  false,
+                                  (improvedContent) => updateSummary(improvedContent)
+                                );
+                              }
                             } else {
-                              openImproveDialog(
-                                resumeData.summary,
-                                'summary',
-                                false,
-                                (improvedContent) => updateSummary(improvedContent)
-                              );
+                              navigateToSettings();
                             }
-                          } else {
-                            navigateToSettings();
-                          }
-                        }}
-                      >
-                        <Sparkles className="w-4 h-4 mr-2" />
-                        {!resumeData.summary || !resumeData.summary.trim() ? 'Generate with AI' : 'Improve with AI'}
-                      </Button>
+                          }}
+                          disabled={isGeneratingSummary}
+                        >
+                          {isGeneratingSummary ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Generating AI suggestions...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              {!resumeData.summary || !resumeData.summary.trim() ? 'Generate with AI' : 'Improve with AI'}
+                            </>
+                          )}
+                        </Button>
+                        {originalSummary && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={restoreOriginalSummary}
+                          >
+                            Return to original
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <RichTextEditor
                       value={resumeData.summary}
                       onChange={(value) => updateSummary(value)}
-                      placeholder="Write a compelling professional summary or click 'Generate with AI' to create one based on your resume..."
+                      placeholder="e.g., Results-driven professional with 5+ years of experience in software development..."
                       minHeight="150px"
                     />
                     {industryTone && rewriteStyle && (
@@ -2332,7 +2538,7 @@ export function AIRewritePanel({
                           <Input
                             value={exp.title}
                             onChange={(e) => updateExperience(exp.id, 'title', e.target.value)}
-                            placeholder="Senior Software Engineer"
+                            placeholder="e.g., Senior Software Engineer"
                           />
                         </div>
 
@@ -2342,7 +2548,7 @@ export function AIRewritePanel({
                             <Input
                               value={exp.company}
                               onChange={(e) => updateExperience(exp.id, 'company', e.target.value)}
-                              placeholder="Tech Corp"
+                              placeholder="e.g., Tech Corp"
                             />
                           </div>
                           <div>
@@ -2350,7 +2556,7 @@ export function AIRewritePanel({
                             <Input
                               value={exp.location}
                               onChange={(e) => updateExperience(exp.id, 'location', e.target.value)}
-                              placeholder="San Francisco, CA"
+                              placeholder="e.g., San Francisco, CA"
                             />
                           </div>
                         </div>
@@ -2361,7 +2567,7 @@ export function AIRewritePanel({
                             <Input
                               value={exp.startDate}
                               onChange={(e) => updateExperience(exp.id, 'startDate', e.target.value)}
-                              placeholder="Jan 2020"
+                              placeholder="e.g., Jan 2020"
                             />
                           </div>
                           <div>
@@ -2370,7 +2576,7 @@ export function AIRewritePanel({
                               <Input
                                 value={exp.endDate}
                                 onChange={(e) => updateExperience(exp.id, 'endDate', e.target.value)}
-                                placeholder="Dec 2023"
+                                placeholder="e.g., Dec 2023"
                                 disabled={exp.current}
                               />
                               <label className="flex items-center gap-2 text-sm">
@@ -2389,39 +2595,51 @@ export function AIRewritePanel({
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <Label>Description</Label>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                              onClick={() => {
-                                if (!exp.description || !exp.description.trim()) {
-                                  toast.warning('Please add some content first', {
-                                    description: 'Add your job description before using AI improvement'
-                                  });
-                                  return;
-                                }
-                                if (industryTone && rewriteStyle) {
-                                  // Check if description contains bullets
-                                  const hasBullets = exp.description.includes('•') || exp.description.includes('<li>');
-                                  openImproveDialog(
-                                    exp.description,
-                                    'experience',
-                                    hasBullets,
-                                    (improvedContent) => updateExperience(exp.id, 'description', improvedContent)
-                                  );
-                                } else {
-                                  navigateToSettings();
-                                }
-                              }}
-                            >
-                              <Sparkles className="w-4 h-4 mr-2" />
-                              Improve with AI
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                                onClick={() => {
+                                  if (!exp.description || !exp.description.trim()) {
+                                    toast.warning('Please add some content first', {
+                                      description: 'Add your job description before using AI improvement'
+                                    });
+                                    return;
+                                  }
+                                  if (industryTone && rewriteStyle) {
+                                    // Check if description contains bullets
+                                    const hasBullets = exp.description.includes('•') || exp.description.includes('<li>');
+                                    openImproveDialog(
+                                      exp.description,
+                                      'experience',
+                                      hasBullets,
+                                      (improvedContent) => updateExperience(exp.id, 'description', improvedContent),
+                                      exp.id
+                                    );
+                                  } else {
+                                    navigateToSettings();
+                                  }
+                                }}
+                              >
+                                <Sparkles className="w-4 h-4 mr-2" />
+                                Improve with AI
+                              </Button>
+                              {originalExperience[exp.id] && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => restoreOriginalExperience(exp.id)}
+                                >
+                                  Return to original
+                                </Button>
+                              )}
+                            </div>
                           </div>
                           <RichTextEditor
                             value={exp.description}
                             onChange={(value) => updateExperience(exp.id, 'description', value)}
-                            placeholder="Describe your responsibilities and achievements..."
+                            placeholder="e.g., • Led development of new features that increased user engagement by 30%&#10;• Managed team of 5 developers..."
                             minHeight="120px"
                           />
                         </div>
@@ -2472,7 +2690,7 @@ export function AIRewritePanel({
                           <Input
                             value={edu.degree}
                             onChange={(e) => updateEducation(edu.id, 'degree', e.target.value)}
-                            placeholder="Bachelor of Science in Computer Science"
+                            placeholder="e.g., Bachelor of Science in Computer Science"
                           />
                         </div>
 
@@ -2482,7 +2700,7 @@ export function AIRewritePanel({
                             <Input
                               value={edu.institution}
                               onChange={(e) => updateEducation(edu.id, 'institution', e.target.value)}
-                              placeholder="University of Technology"
+                              placeholder="e.g., University of California"
                             />
                           </div>
                           <div>
@@ -2490,7 +2708,7 @@ export function AIRewritePanel({
                             <Input
                               value={edu.location}
                               onChange={(e) => updateEducation(edu.id, 'location', e.target.value)}
-                              placeholder="Boston, MA"
+                              placeholder="e.g., Berkeley, CA"
                             />
                           </div>
                         </div>
@@ -2501,7 +2719,7 @@ export function AIRewritePanel({
                             <Input
                               value={edu.startDate}
                               onChange={(e) => updateEducation(edu.id, 'startDate', e.target.value)}
-                              placeholder="Sep 2016"
+                              placeholder="e.g., Sep 2016"
                             />
                           </div>
                           <div>
@@ -2510,7 +2728,7 @@ export function AIRewritePanel({
                               <Input
                                 value={edu.endDate}
                                 onChange={(e) => updateEducation(edu.id, 'endDate', e.target.value)}
-                                placeholder="May 2020"
+                                placeholder="e.g., May 2020"
                                 disabled={edu.current}
                               />
                               <label className="flex items-center gap-2 text-sm">
@@ -2529,38 +2747,50 @@ export function AIRewritePanel({
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <Label>Details (GPA, honors, coursework)</Label>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                              onClick={() => {
-                                if (!edu.details || !edu.details.trim()) {
-                                  toast.warning('Please add some content first', {
-                                    description: 'Add education details before using AI improvement'
-                                  });
-                                  return;
-                                }
-                                if (industryTone && rewriteStyle) {
-                                  const hasBullets = edu.details.includes('•') || edu.details.includes('<li>');
-                                  openImproveDialog(
-                                    edu.details,
-                                    'education',
-                                    hasBullets,
-                                    (improvedContent) => updateEducation(edu.id, 'details', improvedContent)
-                                  );
-                                } else {
-                                  navigateToSettings();
-                                }
-                              }}
-                            >
-                              <Sparkles className="w-4 h-4 mr-2" />
-                              Improve with AI
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                                onClick={() => {
+                                  if (!edu.details || !edu.details.trim()) {
+                                    toast.warning('Please add some content first', {
+                                      description: 'Add education details before using AI improvement'
+                                    });
+                                    return;
+                                  }
+                                  if (industryTone && rewriteStyle) {
+                                    const hasBullets = edu.details.includes('•') || edu.details.includes('<li>');
+                                    openImproveDialog(
+                                      edu.details,
+                                      'education',
+                                      hasBullets,
+                                      (improvedContent) => updateEducation(edu.id, 'details', improvedContent),
+                                      edu.id
+                                    );
+                                  } else {
+                                    navigateToSettings();
+                                  }
+                                }}
+                              >
+                                <Sparkles className="w-4 h-4 mr-2" />
+                                Improve with AI
+                              </Button>
+                              {originalEducation[edu.id] && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => restoreOriginalEducation(edu.id)}
+                                >
+                                  Return to original
+                                </Button>
+                              )}
+                            </div>
                           </div>
                           <RichTextEditor
                             value={edu.details}
                             onChange={(value) => updateEducation(edu.id, 'details', value)}
-                            placeholder="GPA: 3.8/4.0, Dean's List..."
+                            placeholder="e.g., GPA: 3.8/4.0, Dean's List, Relevant coursework: Data Structures, Algorithms..."
                             minHeight="100px"
                           />
                         </div>
@@ -2630,7 +2860,7 @@ export function AIRewritePanel({
                         ...prev,
                         skillsRichText: value
                       }))}
-                      placeholder="• JavaScript, TypeScript, Python\n• React, Node.js, Express\n• SQL, MongoDB, PostgreSQL"
+                      placeholder="e.g., • JavaScript, TypeScript, Python&#10;• React, Node.js, Express&#10;• SQL, MongoDB, PostgreSQL"
                       minHeight="200px"
                     />
                     
@@ -2662,12 +2892,12 @@ export function AIRewritePanel({
                           <Input
                             value={link.label}
                             onChange={(e) => updateLink(link.id, 'label', e.target.value)}
-                            placeholder="Label (e.g., Portfolio)"
+                            placeholder="e.g., Portfolio"
                           />
                           <Input
                             value={link.url}
                             onChange={(e) => updateLink(link.id, 'url', e.target.value)}
-                            placeholder="URL"
+                            placeholder="e.g., https://yourportfolio.com"
                           />
                         </div>
                         <Button
@@ -2719,38 +2949,50 @@ export function AIRewritePanel({
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Label>Content</Label>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-                          onClick={() => {
-                            if (!section.content || !section.content.trim()) {
-                              toast.warning('Please add some content first', {
-                                description: 'Add content to this section before using AI improvement'
-                              });
-                              return;
-                            }
-                            if (industryTone && rewriteStyle) {
-                              const hasBullets = section.content.includes('•') || section.content.includes('<li>');
-                              openImproveDialog(
-                                section.content,
-                                'custom',
-                                hasBullets,
-                                (improvedContent) => updateCustomSection(section.id, 'content', improvedContent)
-                              );
-                            } else {
-                              navigateToSettings();
-                            }
-                          }}
-                        >
-                          <Sparkles className="w-4 h-4 mr-2" />
-                          Improve with AI
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                            onClick={() => {
+                              if (!section.content || !section.content.trim()) {
+                                toast.warning('Please add some content first', {
+                                  description: 'Add content to this section before using AI improvement'
+                                });
+                                return;
+                              }
+                              if (industryTone && rewriteStyle) {
+                                const hasBullets = section.content.includes('•') || section.content.includes('<li>');
+                                openImproveDialog(
+                                  section.content,
+                                  'custom',
+                                  hasBullets,
+                                  (improvedContent) => updateCustomSection(section.id, 'content', improvedContent),
+                                  section.id
+                                );
+                              } else {
+                                navigateToSettings();
+                              }
+                            }}
+                          >
+                            <Sparkles className="w-4 h-4 mr-2" />
+                            Improve with AI
+                          </Button>
+                          {originalCustomSections[section.id] && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => restoreOriginalCustomSection(section.id)}
+                            >
+                              Return to original
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       <RichTextEditor
                         value={section.content}
                         onChange={(value) => updateCustomSection(section.id, 'content', value)}
-                        placeholder="Add your content here..."
+                        placeholder="e.g., • First achievement or item&#10;• Second achievement or item&#10;• Third achievement or item"
                         minHeight="150px"
                       />
                     </div>
@@ -2762,15 +3004,6 @@ export function AIRewritePanel({
                       onThumbsDown={handleThumbsDown}
                       className="mb-4"
                     />
-
-                    <Button
-                      variant="outline"
-                      className="w-full text-red-500 hover:text-red-600"
-                      onClick={() => deleteCustomSection(section.id)}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Delete this section
-                    </Button>
                   </div>
                 )
               ))}
@@ -2792,18 +3025,15 @@ export function AIRewritePanel({
                 Reorder sections
               </Button>
 
-              {!isLastSection() ? (
+              {!isLastSection() && (
                 <Button onClick={handleNextSection}>
                   Next
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
-              ) : (
-                <Button onClick={handleFinish}>
-                  Finish
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
               )}
             </div>
+
+
           </div>
         </div>
 
@@ -3134,6 +3364,54 @@ export function AIRewritePanel({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* AI HR Suggestions Floating Overlay */}
+      {!jobDescription && (
+        <AIHRSuggestions
+          resumeData={resumeData}
+          isExpanded={showAIHRSuggestions}
+          onToggle={() => setShowAIHRSuggestions(!showAIHRSuggestions)}
+          cachedSuggestions={cachedAISuggestions}
+          onSuggestionsGenerated={(suggestions) => {
+            setCachedAISuggestions(suggestions);
+            setForceRegenerateAI(false);
+          }}
+          forceRegenerate={forceRegenerateAI}
+        />
+      )}
+      
+      {/* Job Match Score Floating Overlay */}
+      {jobDescription && showJobMatchScore && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
+              <h3 className="text-lg font-semibold text-gray-900">Job Match Analysis</h3>
+              <button
+                onClick={() => setShowJobMatchScore(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6">
+              <JobMatchScore
+                resumeData={resumeData}
+                jobDescription={jobDescription}
+                isExpanded={true}
+                onToggle={() => setShowJobMatchScore(false)}
+                cachedMatchResult={cachedJobMatchScore}
+                onMatchResultGenerated={(result) => {
+                  setCachedJobMatchScore(result);
+                  setForceRegenerateMatch(false);
+                }}
+                forceRegenerate={forceRegenerateMatch}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

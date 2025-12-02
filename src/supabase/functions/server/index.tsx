@@ -1042,6 +1042,156 @@ Return ONLY the JSON object with no additional formatting or text.`;
   }
 });
 
+// ============= JOB DESCRIPTION IMPORT ENDPOINT =============
+
+// Fetch job description from URL (LinkedIn, Indeed, etc.)
+app.post("/make-server-bc1c5df9/import-job", async (c) => {
+  try {
+    const { url } = await c.req.json();
+
+    if (!url) {
+      return c.json({ error: 'URL is required' }, 400);
+    }
+
+    console.log(`🔗 Fetching job description from URL: ${url}`);
+
+    try {
+      // Fetch the URL content
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
+      }
+
+      const html = await response.text();
+      console.log(`✅ Fetched HTML content, length: ${html.length} chars`);
+
+      // Check if we got a login page or restricted content
+      const isLinkedInLoginPage = html.includes('authwall') || 
+                                   html.includes('signin') || 
+                                   html.includes('login') ||
+                                   html.includes('Join now') ||
+                                   html.length < 5000; // LinkedIn login pages are typically short
+
+      if (url.includes('linkedin.com') && isLinkedInLoginPage) {
+        console.log('⚠️ LinkedIn requires authentication - login page detected');
+        return c.json({ 
+          error: 'LinkedIn requires login to view job postings',
+          message: 'LinkedIn blocks automated access to job postings. Please copy the job description manually from your browser.',
+          requiresManualCopy: true
+        }, 403);
+      }
+
+      // Use OpenAI to extract job description from HTML
+      const openaiKey = Deno.env.get('OPENAI_API_KEY');
+      
+      if (!openaiKey) {
+        console.log('❌ OpenAI API key not found, using basic extraction');
+        // Basic fallback: strip HTML tags and return
+        const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        return c.json({ 
+          jobDescription: textContent.substring(0, 3000), // Limit to 3000 chars
+          source: url,
+          method: 'basic'
+        });
+      }
+
+      console.log('🤖 Using OpenAI to extract job description from HTML...');
+
+      const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openaiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: `You are a job description extractor. Your task is to extract ONLY the job posting information from HTML content.
+
+Extract and format the following information if available:
+- Job Title
+- Company Name
+- Location
+- Job Type (Full-time, Part-time, etc.)
+- About the Role / Job Description
+- Responsibilities / What you'll do
+- Qualifications / Requirements / What we're looking for
+- Preferred Qualifications (if any)
+- Skills Required
+- Benefits / What we offer (if mentioned)
+
+Format the output as clean, readable text with clear section headers and bullet points where appropriate.
+
+IMPORTANT: 
+- Extract ONLY job-related content
+- Skip navigation menus, footers, ads, cookie notices, and other non-job content
+- If you cannot find a clear job description in the content, respond with exactly: "ERROR: No job description found"
+- Do NOT make up information that isn't in the source`
+            },
+            {
+              role: 'user',
+              content: `Extract the job description from this HTML content:\n\n${html.substring(0, 100000)}` // Increased to 100k chars
+            }
+          ],
+          temperature: 0.2, // Lower temperature for more consistent extraction
+          max_tokens: 3000 // Increased token limit for longer job descriptions
+        })
+      });
+
+      if (!openaiResponse.ok) {
+        const errorText = await openaiResponse.text();
+        console.error('❌ OpenAI API error:', errorText);
+        throw new Error(`OpenAI API error: ${openaiResponse.status}`);
+      }
+
+      const openaiData = await openaiResponse.json();
+      const jobDescription = openaiData.choices[0].message.content.trim();
+
+      console.log(`✅ Extracted job description preview (first 200 chars): ${jobDescription.substring(0, 200)}`);
+
+      // Check if OpenAI detected no job description
+      if (jobDescription.startsWith('ERROR:') || jobDescription.length < 100) {
+        console.log('⚠️ No job description found in content or extraction too short');
+        console.log('HTML preview (first 1000 chars):', html.substring(0, 1000));
+        return c.json({ 
+          error: 'No job description found',
+          message: 'Could not extract a job description from this URL. The page may require JavaScript to load content, or the job posting may not be available. Please copy the job description manually.',
+          requiresManualCopy: true
+        }, 400);
+      }
+
+      console.log(`✅ Extracted job description, length: ${jobDescription.length} chars`);
+
+      return c.json({
+        jobDescription,
+        source: url,
+        method: 'ai'
+      });
+
+    } catch (fetchError) {
+      console.error('❌ Error fetching or parsing URL:', fetchError);
+      return c.json({ 
+        error: `Failed to fetch job description: ${fetchError.message}`,
+        details: fetchError.toString()
+      }, 500);
+    }
+
+  } catch (error) {
+    console.error('❌ Import job endpoint error:', error);
+    return c.json({ 
+      error: 'Failed to import job description',
+      details: error.toString()
+    }, 500);
+  }
+});
+
 // ============= AUTH ROUTES =============
 
 // Sign up new user
@@ -1803,8 +1953,8 @@ app.post("/make-server-bc1c5df9/optimize", async (c) => {
     const toneGuidance = toneInstructions[industryTone as keyof typeof toneInstructions] || toneInstructions.none;
     const styleGuidance = styleInstructions[rewriteStyle as keyof typeof styleInstructions] || styleInstructions.none;
 
-    // Determine if this is a factual/conservative section (Contact, Education, Skills)
-    const conservativeSections = ['HEADER', 'CONTACT', 'EDUCATION', 'ACADEMIC BACKGROUND', 'SKILLS', 'TECHNICAL SKILLS', 'CORE COMPETENCIES', 'CORE SKILLS', 'KEY SKILLS', 'CERTIFICATIONS', 'CERTIFICATES', 'PROFESSIONAL CERTIFICATIONS', 'LICENSES AND CERTIFICATIONS', 'LANGUAGES'];
+    // Determine if this is a factual/conservative section (Contact, Education, Skills, Awards, etc.)
+    const conservativeSections = ['HEADER', 'CONTACT', 'EDUCATION', 'ACADEMIC BACKGROUND', 'SKILLS', 'TECHNICAL SKILLS', 'CORE COMPETENCIES', 'CORE SKILLS', 'KEY SKILLS', 'CERTIFICATIONS', 'CERTIFICATES', 'PROFESSIONAL CERTIFICATIONS', 'LICENSES AND CERTIFICATIONS', 'LANGUAGES', 'AWARDS', 'HONORS', 'HONORS AND AWARDS', 'ACHIEVEMENTS', 'PUBLICATIONS', 'PATENTS', 'COURSES', 'COURSEWORK', 'RELEVANT COURSEWORK', 'VOLUNTEER', 'VOLUNTEERING', 'VOLUNTEER WORK', 'INTERESTS', 'HOBBIES', 'REFERENCES'];
     const isConservativeSection = conservativeSections.some(section => 
       sectionType.toUpperCase().includes(section) || section.includes(sectionType.toUpperCase())
     );
@@ -1817,10 +1967,12 @@ app.post("/make-server-bc1c5df9/optimize", async (c) => {
 
 SECTION TYPE: ${sectionType} (FACTUAL/INFORMATIONAL)
 
-IMPORTANT: This section contains factual information (contact details, education, skills, certifications, or languages). Make MINIMAL changes.
+IMPORTANT: This section contains factual information (contact details, education, skills, certifications, awards, or languages). Make MINIMAL changes.
 
 CONSERVATIVE OPTIMIZATION RULES:
-- Preserve ALL factual information exactly as provided (names, dates, locations, degrees, skills, tools, contact info)
+- Preserve ALL factual information exactly as provided (names, dates, locations, degrees, skills, tools, contact info, GPAs, coursework, awards, honors)
+- Preserve ALL bullet lists exactly as written (coursework lists, skills lists, certifications, awards, publications)
+- Preserve ALL numerical data (GPAs, test scores, dates, quantities)
 - Only make minor formatting improvements for consistency
 - Fix obvious typos or formatting inconsistencies
 - Ensure proper capitalization and punctuation
@@ -1828,7 +1980,8 @@ CONSERVATIVE OPTIMIZATION RULES:
 - Do NOT add skills, tools, or qualifications that aren't listed
 - Do NOT embellish or exaggerate educational achievements
 - Do NOT modify contact information
-- Do NOT rewrite or rephrase - just clean up formatting
+- Do NOT modify or rewrite coursework, GPA, test scores, or any factual lists
+- Do NOT rewrite or rephrase content - just clean up formatting
 
 CRITICAL INSTRUCTIONS:
 - Return ONLY the cleaned-up content itself
@@ -1845,6 +1998,23 @@ Your task is to make minimal, conservative improvements to factual resume sectio
 TONE: ${toneGuidance}
 
 STYLE: ${styleGuidance}
+
+${sectionType.toUpperCase().includes('SUMMARY') || sectionType.toUpperCase().includes('PROFESSIONAL SUMMARY') ? `
+PROFESSIONAL SUMMARY GUIDELINES:
+- Keep it 3-4 sentences max (prioritize brevity and impact)
+- Be CONCISE and focused - every word must add value
+- Use SHORT, punchy sentences that highlight achievements
+- ELIMINATE redundant or repetitive phrases - say things once
+- Focus ONLY on the most relevant skills for the target role (avoid listing everything)
+- Highlight key achievements with quantifiable metrics
+- For educators/teachers: emphasize teaching skills, curriculum development, and student outcomes
+- For technical roles: emphasize specific technologies, tools, and technical skills
+- Use keywords from the job description to improve ATS matching
+- Avoid generic phrases like hardworking or team player - instead, highlight measurable impact
+- SHORTEN sentences - avoid run-on sentences
+- Remove any repetitive information - each sentence must add DISTINCT value
+- Apply the Industry Tone (${industryTone}) and Rewrite Style (${rewriteStyle}) selected by the user
+` : ''}
 
 CRITICAL INSTRUCTIONS:
 - Return ONLY the optimized resume content itself
@@ -1863,7 +2033,20 @@ Your task is to optimize resume sections to better match job descriptions while 
       userPrompt = `Resume Section (${sectionType}):
 ${resumeSection}
 
-This is a factual section containing ${sectionType.toLowerCase()}. Make ONLY minimal formatting improvements. Do NOT add, remove, or significantly modify any information. Fix typos and ensure consistent formatting. Return ONLY the cleaned-up content with no additional commentary or explanatory text.`;
+This is a factual section containing ${sectionType.toLowerCase()}. Make ONLY minimal formatting improvements. 
+
+CRITICAL - DO NOT MODIFY:
+- Any bullet lists (coursework, skills, certifications, awards, publications)
+- Any numerical data (GPAs, test scores, dates, years)
+- Any factual content (names, locations, institutions, degrees, awards, honors)
+- Any specific technical skills, tools, or technologies listed
+
+You may ONLY:
+- Fix obvious typos or spelling errors
+- Ensure consistent capitalization
+- Fix punctuation inconsistencies
+
+Return ONLY the cleaned-up content with no additional commentary or explanatory text.`;
     } else {
       userPrompt = `Job Description:
 ${jobDescription}
@@ -1997,8 +2180,14 @@ app.post("/make-server-bc1c5df9/improve-content", async (c) => {
     }
     
     console.log(`Improving ${isBulletPoint ? 'bullet point' : 'section'}: ${sectionType}`);
+    
+    // Determine if this is a factual/conservative section
+    const conservativeSections = ['HEADER', 'CONTACT', 'EDUCATION', 'ACADEMIC BACKGROUND', 'SKILLS', 'TECHNICAL SKILLS', 'CORE COMPETENCIES', 'CORE SKILLS', 'KEY SKILLS', 'CERTIFICATIONS', 'CERTIFICATES', 'PROFESSIONAL CERTIFICATIONS', 'LICENSES AND CERTIFICATIONS', 'LANGUAGES', 'AWARDS', 'HONORS', 'HONORS AND AWARDS', 'ACHIEVEMENTS', 'PUBLICATIONS', 'PATENTS', 'COURSES', 'COURSEWORK', 'RELEVANT COURSEWORK', 'VOLUNTEER', 'VOLUNTEERING', 'VOLUNTEER WORK', 'INTERESTS', 'HOBBIES', 'REFERENCES'];
+    const isConservativeSection = sectionType && conservativeSections.some(section => 
+      sectionType.toUpperCase().includes(section) || section.includes(sectionType.toUpperCase())
+    );
 
-    // Build dynamic prompt based on tone and style
+    // Build dynamic prompt based on tone and style (needed for both conservative and aggressive modes)
     const toneInstructions = {
       none: 'Use natural, professional language without any specific tone emphasis.',
       professional: 'Use professional and formal language. Focus on industry-standard terminology.',
@@ -2018,7 +2207,55 @@ app.post("/make-server-bc1c5df9/improve-content", async (c) => {
     const toneGuidance = toneInstructions[industryTone as keyof typeof toneInstructions] || toneInstructions.none;
     const styleGuidance = styleInstructions[rewriteStyle as keyof typeof styleInstructions] || styleInstructions.none;
 
-    const systemPrompt = `You are an expert resume writer specializing in ATS-optimized content.
+    let systemPrompt;
+    let userPrompt;
+
+    if (isConservativeSection) {
+      // Conservative mode: minimal changes for factual sections
+      console.log(`🔒 Conservative mode enabled for ${sectionType}`);
+      
+      systemPrompt = `You are an expert resume editor specializing in factual accuracy.
+
+SECTION TYPE: ${sectionType} (FACTUAL/INFORMATIONAL)
+
+IMPORTANT: This section contains factual information. Make MINIMAL changes.
+
+CONSERVATIVE EDITING RULES:
+- Preserve ALL factual information exactly as provided (names, dates, GPAs, coursework, skills, awards, honors, certifications)
+- Preserve ALL bullet lists exactly as written
+- Preserve ALL numerical data (GPAs, test scores, dates, quantities)
+- Only fix obvious typos or spelling errors
+- Ensure consistent capitalization
+- Fix punctuation inconsistencies
+- Do NOT add, remove, or modify any factual content
+- Do NOT rewrite or rephrase - just clean up formatting
+
+OUTPUT REQUIREMENTS:
+- Return ONLY the cleaned-up content itself
+- Do NOT include any introductory phrases
+- Do NOT include any commentary or explanations
+- Simply provide the minimally improved content
+${isBulletPoint ? '- Return only ONE item (do NOT add a bullet symbol, just the text)' : ''}`;
+
+      userPrompt = `Content to improve:
+${content}
+
+This is factual content from ${sectionType}. Make ONLY minimal formatting improvements (typos, capitalization, punctuation). Do NOT modify the actual content or facts. ${isBulletPoint ? 'Return only the improved text without a bullet symbol.' : ''}`;
+      
+    } else {
+      // Regular aggressive optimization for experience/summary sections
+      console.log(`✨ Aggressive optimization mode for ${sectionType}`);
+      
+      // Import prompt builders
+      const { buildImproveContentPrompt, buildImproveUserPrompt } = await import('./prompts.tsx');
+      
+      // Build professional HR-optimized prompts
+      systemPrompt = buildImproveContentPrompt(toneGuidance, styleGuidance, isBulletPoint, jobDescription);
+      userPrompt = buildImproveUserPrompt(content, jobDescription, isBulletPoint);
+    }
+
+    // Old prompt for reference (now using professional HR prompts from prompts.tsx)
+    const _oldSystemPrompt = `You are an expert resume writer specializing in ATS-optimized content.
 
 TONE: ${toneGuidance}
 
@@ -2036,7 +2273,7 @@ ${jobDescription ? '- Incorporate relevant keywords from the job description nat
 
 Your task is to improve the content using strong action verbs, quantifying achievements where possible, and making it more impactful.`;
 
-    const userPrompt = jobDescription 
+    const _oldUserPrompt = jobDescription 
       ? `Job Description:\n${jobDescription}\n\nContent to improve:\n${content}\n\nImprove this content to better match the job description while following the tone and style guidelines. ${isBulletPoint ? 'Return only the improved text without a bullet symbol.' : ''}`
       : `Content to improve:\n${content}\n\nImprove this content following the tone and style guidelines. ${isBulletPoint ? 'Return only the improved text without a bullet symbol.' : ''}`;
 
@@ -2135,6 +2372,9 @@ app.post("/make-server-bc1c5df9/generate-summary", async (c) => {
     }
     
     console.log(`Generating professional summary with tone: ${industryTone}, style: ${rewriteStyle}`);
+    
+    // Import prompt builders
+    const { buildGenerateSummaryPrompt, buildGenerateSummaryUserPrompt } = await import('./prompts.tsx');
 
     // Build dynamic prompt based on tone and style
     const toneInstructions = {
@@ -2155,8 +2395,13 @@ app.post("/make-server-bc1c5df9/generate-summary", async (c) => {
 
     const toneGuidance = toneInstructions[industryTone as keyof typeof toneInstructions] || toneInstructions.none;
     const styleGuidance = styleInstructions[rewriteStyle as keyof typeof styleInstructions] || styleInstructions.none;
+    
+    // Build professional HR-optimized prompts
+    const systemPrompt = buildGenerateSummaryPrompt(toneGuidance, styleGuidance, jobDescription);
+    const userPrompt = buildGenerateSummaryUserPrompt(resumeContext, jobDescription);
 
-    const systemPrompt = `You are an expert resume writer specializing in creating compelling professional summaries.
+    // Old prompt for reference (now using professional HR prompts from prompts.tsx)
+    const _oldSystemPrompt = `You are an expert resume writer specializing in creating compelling professional summaries.
 
 TONE: ${toneGuidance}
 
@@ -2176,7 +2421,7 @@ ${jobDescription ? '- Tailor the summary to align with the job description keywo
 
 Your task is to craft a professional summary that captures the candidate's value proposition using strong, impactful language.`;
 
-    const userPrompt = jobDescription 
+    const _oldUserPrompt = jobDescription 
       ? `Resume Information:\n${resumeContext}\n\nJob Description:\n${jobDescription}\n\nGenerate a professional summary that highlights how this candidate's background aligns with the job requirements.`
       : `Resume Information:\n${resumeContext}\n\nGenerate a compelling professional summary based on this resume.`;
 
@@ -2248,6 +2493,194 @@ Your task is to craft a professional summary that captures the candidate's value
   }
 });
 
+// AI HR Suggestions (no job description required)
+app.post("/make-server-bc1c5df9/ai-hr-suggestions", async (c) => {
+  try {
+    console.log('💼 AI HR Suggestions endpoint called');
+    const { resumeData } = await c.req.json();
+
+    if (!resumeData) {
+      console.log('❌ Missing resume data');
+      return c.json({ error: 'Resume data is required' }, 400);
+    }
+
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    
+    if (!openaiKey) {
+      console.log('❌ OpenAI API key not found in environment');
+      return c.json({ 
+        error: 'OpenAI API key not configured. Please add your OPENAI_API_KEY in the environment variables.' 
+      }, 500);
+    }
+    
+    if (!openaiKey.startsWith('sk-')) {
+      console.log('⚠️ OpenAI API key appears invalid (does not start with sk-)');
+      return c.json({ 
+        error: 'OpenAI API key appears invalid. Please check your OPENAI_API_KEY value.' 
+      }, 500);
+    }
+    
+    console.log('✅ Generating AI HR suggestions for resume');
+
+    // Build resume context and track existing sections
+    const resumeContext = [];
+    const existingSections = [];
+    
+    if (resumeData.contact?.name) {
+      resumeContext.push(`Name: ${resumeData.contact.name}`);
+      existingSections.push('Contact Information');
+    }
+    
+    if (resumeData.summary) {
+      resumeContext.push(`Professional Summary: ${resumeData.summary}`);
+      existingSections.push('Professional Summary');
+    }
+    
+    if (resumeData.experience && resumeData.experience.length > 0) {
+      resumeContext.push(`Experience (${resumeData.experience.length} positions):`);
+      resumeData.experience.forEach((exp: any, idx: number) => {
+        resumeContext.push(`  ${idx + 1}. ${exp.title || 'Position'} at ${exp.company || 'Company'} (${exp.startDate || ''} - ${exp.endDate || exp.current ? 'Present' : ''})`);
+        if (exp.description) {
+          resumeContext.push(`     ${exp.description.substring(0, 200)}...`);
+        }
+      });
+      existingSections.push('Work Experience');
+    }
+    
+    if (resumeData.education && resumeData.education.length > 0) {
+      resumeContext.push(`Education (${resumeData.education.length} entries):`);
+      resumeData.education.forEach((edu: any, idx: number) => {
+        resumeContext.push(`  ${idx + 1}. ${edu.degree || 'Degree'} from ${edu.institution || 'Institution'} (${edu.graduationDate || ''})`);
+      });
+      existingSections.push('Education');
+    }
+    
+    if (resumeData.skills) {
+      resumeContext.push(`Skills: ${resumeData.skills}`);
+      existingSections.push('Skills');
+    }
+
+    // Include all custom sections
+    if (resumeData.customSections && resumeData.customSections.length > 0) {
+      resumeData.customSections.forEach((section: any) => {
+        if (section.name && section.content) {
+          resumeContext.push(`${section.name}:`);
+          resumeContext.push(`  ${section.content.substring(0, 300)}${section.content.length > 300 ? '...' : ''}`);
+          existingSections.push(section.name);
+        }
+      });
+    }
+
+    const resumeText = resumeContext.join('\n');
+    const sectionsText = existingSections.join(', ');
+    
+    console.log(`📋 Detected ${existingSections.length} sections: ${sectionsText}`);
+
+    const systemPrompt = `You are an expert HR consultant and resume advisor specializing in career development and resume optimization. 
+
+Your role is to analyze resumes and provide actionable, professional recommendations to improve them based on:
+- General HR best practices
+- Industry standards and trends
+- ATS (Applicant Tracking System) optimization
+- Professional formatting and presentation
+- Career progression and positioning
+- Target role alignment
+
+Provide specific, actionable suggestions that can be immediately implemented.`;
+
+    const userPrompt = `Analyze this resume and provide comprehensive improvement suggestions:
+
+EXISTING SECTIONS IN THIS RESUME:
+${sectionsText}
+
+FULL RESUME CONTENT:
+${resumeText}
+
+IMPORTANT INSTRUCTIONS:
+- This resume ALREADY CONTAINS the sections listed above
+- DO NOT suggest adding any sections that already exist
+- Focus your suggestions on IMPROVING the existing content and structure
+- Only suggest adding NEW sections if they are truly missing and would add significant value
+- Make all suggestions SPECIFIC to this particular resume's content and the candidate's background
+- Include ATS optimization tips and target role recommendations as part of your general suggestions
+- Prioritize suggestions by impact - most important improvements first
+
+Please provide your analysis in the following JSON format:
+{
+  "generalSuggestions": ["array of 10-12 prioritized, actionable suggestions to improve THIS SPECIFIC resume - include content quality, quantification, impact statements, ATS optimization, target role alignment, and formatting improvements. Present most impactful suggestions first."]
+}
+
+Make all suggestions SPECIFIC to this candidate's resume, not generic advice. Reference actual sections, content, or patterns you see in the resume. Combine all types of improvements (content, ATS, role optimization, formatting) into one comprehensive prioritized list.`;
+
+    // Call OpenAI API
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 2000,
+        response_format: { type: "json_object" }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ OpenAI API error:', errorData);
+      
+      if (errorData.error?.code === 'insufficient_quota') {
+        return c.json({ 
+          error: 'OpenAI API quota exceeded',
+          details: 'Your OpenAI API key has run out of credits. Please add credits at https://platform.openai.com/settings/organization/billing or upload a new API key with available credits.',
+          errorCode: 'OPENAI_QUOTA_EXCEEDED'
+        }, 402);
+      }
+      
+      return c.json({ error: `AI suggestions generation failed: ${errorData.error?.message || 'Unknown error'}` }, 500);
+    }
+
+    const data = await response.json();
+    const suggestionsText = data.choices[0]?.message?.content || '{}';
+    
+    let suggestions;
+    try {
+      suggestions = JSON.parse(suggestionsText);
+    } catch (parseError) {
+      console.error('Failed to parse AI response:', suggestionsText);
+      return c.json({ error: 'Failed to parse AI response' }, 500);
+    }
+    
+    console.log('✅ AI HR suggestions generated successfully');
+
+    return c.json({ 
+      success: true,
+      suggestions
+    });
+  } catch (error) {
+    console.error('Error generating AI HR suggestions:', error);
+    return c.json({ error: `AI HR suggestions generation failed: ${error.message}` }, 500);
+  }
+});
+
+// Calculate detailed job match score with weighted dimensions
+app.post("/make-server-bc1c5df9/calculate-match-score", async (c) => {
+  const { calculateMatchScoreHandler } = await import('./matchScoreCalculator.tsx');
+  return calculateMatchScoreHandler(c);
+});
+
 // Analyze job match score (no auth required - public feature)
 app.post("/make-server-bc1c5df9/analyze-match", async (c) => {
   try {
@@ -2270,11 +2703,59 @@ app.post("/make-server-bc1c5df9/analyze-match", async (c) => {
     
     console.log('✅ Starting AI match analysis');
 
-    // Combine resume sections into full text
-    const resumeText = Object.entries(resume)
-      .filter(([key]) => !['id', 'userId', 'createdAt', 'updatedAt', 'version'].includes(key))
-      .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-      .join('\n\n');
+    // Build resume context and track existing sections
+    const resumeContext = [];
+    const existingSections = [];
+    
+    if (resume.contact?.name) {
+      resumeContext.push(`Name: ${resume.contact.name}`);
+      existingSections.push('Contact Information');
+    }
+    
+    if (resume.summary) {
+      resumeContext.push(`Professional Summary: ${resume.summary}`);
+      existingSections.push('Professional Summary');
+    }
+    
+    if (resume.experience && resume.experience.length > 0) {
+      resumeContext.push(`Experience (${resume.experience.length} positions):`);
+      resume.experience.forEach((exp: any, idx: number) => {
+        resumeContext.push(`  ${idx + 1}. ${exp.title || 'Position'} at ${exp.company || 'Company'} (${exp.startDate || ''} - ${exp.endDate || exp.current ? 'Present' : ''})`);
+        if (exp.description) {
+          resumeContext.push(`     ${exp.description.substring(0, 300)}${exp.description.length > 300 ? '...' : ''}`);
+        }
+      });
+      existingSections.push('Work Experience');
+    }
+    
+    if (resume.education && resume.education.length > 0) {
+      resumeContext.push(`Education (${resume.education.length} entries):`);
+      resume.education.forEach((edu: any, idx: number) => {
+        resumeContext.push(`  ${idx + 1}. ${edu.degree || 'Degree'} from ${edu.institution || 'Institution'} (${edu.graduationDate || ''})`);
+      });
+      existingSections.push('Education');
+    }
+    
+    if (resume.skills) {
+      resumeContext.push(`Skills: ${resume.skills}`);
+      existingSections.push('Skills');
+    }
+
+    // Include all custom sections
+    if (resume.customSections && resume.customSections.length > 0) {
+      resume.customSections.forEach((section: any) => {
+        if (section.name && section.content) {
+          resumeContext.push(`${section.name}:`);
+          resumeContext.push(`  ${section.content.substring(0, 300)}${section.content.length > 300 ? '...' : ''}`);
+          existingSections.push(section.name);
+        }
+      });
+    }
+
+    const resumeText = resumeContext.join('\n');
+    const sectionsText = existingSections.join(', ');
+    
+    console.log(`📋 Analyzing resume with ${existingSections.length} sections: ${sectionsText}`);
 
     // Call OpenAI API for analysis
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -2288,17 +2769,34 @@ app.post("/make-server-bc1c5df9/analyze-match", async (c) => {
         messages: [
           {
             role: 'system',
-            content: `You are an expert ATS (Applicant Tracking System) analyzer. Analyze how well a resume matches a job description and provide a match score (0-100), key strengths, gaps, and recommendations. Return your response as JSON with this structure:
+            content: `You are an expert ATS (Applicant Tracking System) analyzer. Analyze how well a resume matches a job description and provide a match score (0-100), key strengths, gaps, and recommendations. 
+
+IMPORTANT INSTRUCTIONS:
+- Base your analysis on the ACTUAL content in this specific resume
+- DO NOT suggest adding sections that already exist
+- Make recommendations SPECIFIC to this candidate's background and the job requirements
+- Reference actual content from the resume in your analysis
+
+Return your response as JSON with this structure:
 {
   "score": number (0-100),
-  "strengths": [string array of 3-5 key strengths],
-  "gaps": [string array of 3-5 missing elements],
-  "recommendations": [string array of 3-5 specific improvements]
+  "strengths": [string array of 3-5 key strengths observed in THIS resume that match the job],
+  "gaps": [string array of 3-5 missing elements or areas where the resume doesn't align with job requirements],
+  "recommendations": [string array of 3-5 specific, actionable improvements based on THIS resume's actual content]
 }`
           },
           {
             role: 'user',
-            content: `Job Description:\n${jobDescription}\n\nResume:\n${resumeText}\n\nProvide a detailed match analysis.`
+            content: `EXISTING SECTIONS IN THIS RESUME:
+${sectionsText}
+
+JOB DESCRIPTION:
+${jobDescription}
+
+FULL RESUME CONTENT:
+${resumeText}
+
+Analyze how well THIS SPECIFIC resume matches the job description. Make all feedback specific to the actual content shown above. DO NOT suggest adding sections that already exist (${sectionsText}).`
           }
         ],
         temperature: 0.5,

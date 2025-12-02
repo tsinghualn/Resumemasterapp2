@@ -26,6 +26,7 @@ import { SystemStatus } from './components/SystemStatus';
 import { AITestPanel } from './components/AITestPanel';
 import { EmailVerificationInfo } from './components/EmailVerificationInfo';
 import { FeedbackLearningDashboard } from './components/FeedbackLearningDashboard';
+import { StartFromScratchDialog } from './components/StartFromScratchDialog';
 
 type Screen = 'landing' | 'upload' | 'jobdesc' | 'optimize' | 'matchscore' | 'preview' | 'dashboard' | 'parsed' | 'admin-feedback';
 type AuthMode = 'signin' | 'signup';
@@ -83,6 +84,7 @@ export default function App() {
   const [verificationEmail, setVerificationEmail] = useState('');
   const [parseResumeDialogOpen, setParseResumeDialogOpen] = useState(false);
   const [isFeedbackAnalysisRunning, setIsFeedbackAnalysisRunning] = useState(false);
+  const [startFromScratchDialogOpen, setStartFromScratchDialogOpen] = useState(false);
   
   const [resumeContent, setResumeContent] = useState<string>('');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
@@ -173,7 +175,7 @@ export default function App() {
           const supabase = createClient();
           
           // Query database for role only (username column may not exist)
-          const { data: dbUser, error: dbError } = await supabase
+          const { data: dbUser, error: dbError} = await supabase
             .from('users')
             .select('role')
             .eq('id', session.user.id)
@@ -227,13 +229,40 @@ export default function App() {
     }
   };
 
+  // Clear all cached data when starting fresh
+  const clearAllCachedData = () => {
+    console.log('🧹 Clearing all cached data...');
+    setResumeContent('');
+    setUploadedFileName('');
+    setJobDescription('');
+    setModifiedResume('');
+    setCachedResumeData(null);
+    setIsEditMode(false);
+    setOptimizationFlow('direct');
+  };
+
   const handleGetStarted = async (mode: 'upload' | 'scratch') => {
     setStartMode(mode);
     
+    // Clear all cached data when starting fresh
+    clearAllCachedData();
+    
     if (mode === 'scratch') {
-      // Start with a blank template
+      // Show dialog to choose between AI Resume Building or Tailor for Job
+      setStartFromScratchDialogOpen(true);
+    } else {
+      // Upload mode - open the dialog
+      setParseResumeDialogOpen(true);
+    }
+  };
+
+  const handleStartFromScratchAIBuilding = async () => {
+    try {
+      console.log('🎨 Starting AI Resume Building from scratch...');
+      setStartFromScratchDialogOpen(false);
+      
+      // Create blank template with no pre-filled values so placeholders show properly
       const blankTemplate = `YOUR NAME
-Email: your.email@example.com | Phone: (555) 123-4567 | LinkedIn: linkedin.com/in/yourname
 
 PROFESSIONAL SUMMARY
 
@@ -250,8 +279,11 @@ EDUCATION
 SKILLS
 
 [Add your skills here]`;
+      
       setResumeContent(blankTemplate);
       setUploadedFileName('new-resume.txt');
+      setJobDescription(''); // Clear job description
+      setOptimizationFlow('direct');
       
       // Auto-save blank template if user is authenticated
       if (isAuthenticated && currentUser) {
@@ -269,21 +301,36 @@ SKILLS
           
           const result = await apiClient.createResume(resumeData);
           console.log('✅ Blank resume auto-saved:', result);
-          toast.success('New resume created and saved!', {
-            description: 'Your blank resume has been stored'
+          toast.success('New resume created!', {
+            description: 'Start building with AI assistance'
           });
         } catch (error) {
           console.error('Error auto-saving blank resume:', error);
-          toast.warning('Resume created but not saved', {
-            description: 'Sign in to save your resumes permanently'
-          });
         }
       }
       
-      setCurrentScreen('parsed');
-    } else {
-      // Upload mode - open the dialog
-      setParseResumeDialogOpen(true);
+      // Navigate to AI Resume Optimization page
+      setCurrentScreen('optimize');
+    } catch (error) {
+      console.error('Error in handleStartFromScratchAIBuilding:', error);
+      toast.error('Failed to start AI Resume Building', {
+        description: 'Please try again'
+      });
+    }
+  };
+
+  const handleStartFromScratchTailorForJob = () => {
+    try {
+      console.log('🎯 Starting Tailor for Job from scratch...');
+      setStartFromScratchDialogOpen(false);
+      
+      // Navigate to Job Description page
+      setCurrentScreen('jobdesc');
+    } catch (error) {
+      console.error('Error in handleStartFromScratchTailorForJob:', error);
+      toast.error('Failed to start Tailor for Job', {
+        description: 'Please try again'
+      });
     }
   };
 
@@ -407,6 +454,7 @@ SKILLS
       // Navigate directly to AI Resume optimization - skip parsed screen
       setCurrentScreen('optimize');
       setOptimizationFlow('direct');
+      setJobDescription(''); // Clear job description when going direct to AI Resume Building
       console.log('🎯 Navigation complete - screen set to: jobdesc');
     } else {
       console.log('❌ No content provided, skipping navigation');
@@ -837,6 +885,14 @@ CERTIFICATIONS
           onOpenSignIn={handleOpenSignIn}
         />
         
+        {/* Start from Scratch Dialog - Choose between AI Resume Building or Tailor for Job */}
+        <StartFromScratchDialog
+          open={startFromScratchDialogOpen}
+          onOpenChange={setStartFromScratchDialogOpen}
+          onSelectAIResumeBuilding={handleStartFromScratchAIBuilding}
+          onSelectTailorForJob={handleStartFromScratchTailorForJob}
+        />
+        
         {/* Upload and Parse Resume Dialog */}
         <Dialog open={parseResumeDialogOpen} onOpenChange={setParseResumeDialogOpen}>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -861,6 +917,7 @@ CERTIFICATIONS
                 onNavigateToOptimize={() => {
                   setCurrentScreen('optimize');
                   setOptimizationFlow('direct');
+                  setJobDescription(''); // Clear job description when going direct to AI Resume Building
                   setParseResumeDialogOpen(false);
                 }}
                 onNavigateToJobDesc={() => {
@@ -1153,7 +1210,11 @@ CERTIFICATIONS
             <ResumeUploader 
               key="resume-uploader" 
               onResumeUpload={handleResumeUpload}
-              onNavigateToOptimize={() => setCurrentScreen('optimize')}
+              onNavigateToOptimize={() => {
+                setCurrentScreen('optimize');
+                setOptimizationFlow('direct');
+                setJobDescription(''); // Clear job description when going direct to AI Resume Building
+              }}
               onNavigateToJobDesc={() => setCurrentScreen('jobdesc')}
             />
           </div>

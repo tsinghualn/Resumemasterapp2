@@ -43,6 +43,7 @@ export function AIImproveDialog({
   const [currentBulletIndex, setCurrentBulletIndex] = useState(0);
   const [improvedBullets, setImprovedBullets] = useState<string[]>([]);
   const [originalBullets, setOriginalBullets] = useState<string[]>([]);
+  const [skippedIndices, setSkippedIndices] = useState<Set<number>>(new Set());
 
   // Parse content into bullet points when dialog opens
   useEffect(() => {
@@ -52,6 +53,7 @@ export function AIImproveDialog({
       setOriginalBullets(parsed.map(item => item.content)); // Use 'content' property
       setImprovedBullets(new Array(parsed.length).fill(''));
       setCurrentBulletIndex(0);
+      setSkippedIndices(new Set());
       
       // Start improving the first bullet
       if (parsed.length > 0) {
@@ -63,8 +65,61 @@ export function AIImproveDialog({
     }
   }, [open, content, isList]);
 
+  // Helper function to filter out headers/sub-headers (bold text) from content
+  const filterHeaders = (htmlContent: string): string => {
+    // Create a temporary div to parse HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    
+    // Remove all <strong> and <b> tags (headers/sub-headers)
+    const strongElements = tempDiv.querySelectorAll('strong, b');
+    strongElements.forEach(el => el.remove());
+    
+    const filtered = tempDiv.innerHTML.trim();
+    
+    // Also check if the remaining text is very short (likely just a header with colon)
+    const textContent = tempDiv.textContent?.trim() || '';
+    if (textContent.length < 5 || textContent.endsWith(':')) {
+      return ''; // Treat as header-only content
+    }
+    
+    return filtered;
+  };
+
   const improveBullet = async (bulletText: string, index: number) => {
     setIsLoading(true);
+    console.log('🔧 [AIImproveDialog] Improving bullet:', {
+      bulletText,
+      index,
+      sectionType,
+      industryTone,
+      rewriteStyle,
+      hasJobDescription: !!jobDescription
+    });
+    
+    // Check if this is a header/sub-header (contains <strong> or <b> tags)
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = bulletText;
+    const hasHeaderTags = tempDiv.querySelectorAll('strong, b').length > 0;
+    
+    // Filter out headers before sending to AI
+    const filteredText = filterHeaders(bulletText);
+    
+    // If after filtering there's no content (header-only), preserve the original formatting
+    if (!filteredText || !filteredText.trim()) {
+      console.log('⚠️ [AIImproveDialog] Header-only content detected, preserving original with formatting');
+      // Use functional state update to ensure we have the latest state
+      setImprovedBullets(prev => {
+        const improved = [...prev];
+        // Keep the original text with HTML formatting (bold tags) intact
+        tempDiv.innerHTML = originalBullets[index];
+        improved[index] = tempDiv.textContent || originalBullets[index];
+        return improved;
+      });
+      setIsLoading(false);
+      return;
+    }
+    
     try {
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-bc1c5df9/improve-content`,
@@ -75,7 +130,7 @@ export function AIImproveDialog({
             'Authorization': `Bearer ${publicAnonKey}`,
           },
           body: JSON.stringify({
-            content: bulletText,
+            content: filteredText,
             sectionType,
             industryTone,
             rewriteStyle,
@@ -86,16 +141,22 @@ export function AIImproveDialog({
       );
 
       const result = await response.json();
+      console.log('✅ [AIImproveDialog] API Response:', result);
 
       if (response.ok && result.success) {
-        const improved = [...improvedBullets];
-        improved[index] = result.improvedContent;
-        setImprovedBullets(improved);
+        // Use functional state update to ensure we have the latest state
+        setImprovedBullets(prev => {
+          const improved = [...prev];
+          improved[index] = result.improvedContent;
+          return improved;
+        });
+        console.log('✅ [AIImproveDialog] Updated improved bullets for index:', index);
       } else {
-        toast.error('Failed to improve content');
+        console.error('❌ [AIImproveDialog] Failed to improve content:', result);
+        toast.error(result.error || 'Failed to improve content');
       }
     } catch (error) {
-      console.error('Error improving bullet:', error);
+      console.error('❌ [AIImproveDialog] Error improving bullet:', error);
       toast.error('Failed to improve content');
     } finally {
       setIsLoading(false);
@@ -104,6 +165,10 @@ export function AIImproveDialog({
 
   const improveEntireContent = async () => {
     setIsLoading(true);
+    
+    // Filter out headers before sending to AI
+    const filteredContent = filterHeaders(content);
+    
     try {
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-bc1c5df9/improve-content`,
@@ -114,7 +179,7 @@ export function AIImproveDialog({
             'Authorization': `Bearer ${publicAnonKey}`,
           },
           body: JSON.stringify({
-            content,
+            content: filteredContent,
             sectionType,
             industryTone,
             rewriteStyle,
@@ -140,31 +205,156 @@ export function AIImproveDialog({
   };
 
   const handleAcceptBullet = () => {
+    // Update the improved bullets array with the current state immediately
+    const updatedImprovedBullets = [...improvedBullets];
+    
+    // Combine processed bullets with unprocessed original bullets
+    // Use improved version for bullets at or before current index, original for the rest
+    const combinedContent = bulletItems
+      .map((item, idx) => {
+        let bulletText;
+        
+        if (idx <= currentBulletIndex) {
+          // Use improved version for processed bullets
+          bulletText = updatedImprovedBullets[idx];
+        } else {
+          // Use original version for unprocessed bullets
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = originalBullets[idx];
+          bulletText = tempDiv.textContent || originalBullets[idx];
+        }
+        
+        if (!bulletText || !bulletText.trim()) return null; // Skip empty bullets
+        const indent = item.indent || 0;
+        const spaces = '  '.repeat(indent);
+        return `${spaces}• ${bulletText}`;
+      })
+      .filter(Boolean) // Remove null entries
+      .join('\n');
+    
+    // Update the section immediately with all content (processed + unprocessed)
+    onAccept(combinedContent);
+    
     if (currentBulletIndex < bulletItems.length - 1) {
       // Move to next bullet
       const nextIndex = currentBulletIndex + 1;
       setCurrentBulletIndex(nextIndex);
       improveBullet(bulletItems[nextIndex].content, nextIndex); // Use 'content' property
     } else {
-      // All bullets processed, combine and return
-      const combinedContent = improvedBullets
-        .map((bullet, idx) => {
-          const indent = bulletItems[idx].indent || 0;
-          const spaces = '  '.repeat(indent);
-          return `${spaces}• ${bullet}`;
-        })
-        .join('\n');
-      onAccept(combinedContent);
+      // All bullets processed
       onClose();
       toast.success('Content improved successfully!');
     }
   };
 
   const handleSkipBullet = () => {
-    // Keep original
+    // Keep original - preserve HTML tags and formatting exactly as it was
     const improved = [...improvedBullets];
-    improved[currentBulletIndex] = originalBullets[currentBulletIndex];
+    const originalText = originalBullets[currentBulletIndex];
+    
+    // Store the original HTML to preserve all formatting (bold, italic, etc.)
+    improved[currentBulletIndex] = originalText;
     setImprovedBullets(improved);
+    setSkippedIndices(prev => new Set([...prev, currentBulletIndex]));
+
+    // Combine processed bullets with unprocessed original bullets
+    // Use improved/skipped version for bullets at or before current index, original for the rest
+    const combinedContent = bulletItems
+      .map((item, idx) => {
+        let bulletText;
+        let bulletHtml;
+        const wasSkipped = skippedIndices.has(idx) || idx === currentBulletIndex;
+        
+        if (idx <= currentBulletIndex) {
+          // Use improved/skipped version for processed bullets
+          bulletHtml = improved[idx];
+        } else {
+          // Use original version for unprocessed bullets
+          bulletHtml = originalBullets[idx];
+        }
+        
+        // Extract text content for processing
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = bulletHtml;
+        bulletText = tempDiv.textContent || bulletHtml;
+        
+        if (!bulletText || !bulletText.trim()) return null; // Skip empty bullets
+        
+        // Check if this is a header/subheader type (from ProcessedContent)
+        const isHeaderType = item.type === 'header' || item.type === 'subheader' || item.isHeader;
+        
+        // For headers/subheaders that were skipped, preserve the original HTML formatting
+        if (wasSkipped && isHeaderType) {
+          // Check if original has HTML formatting (bold, italic, etc.)
+          const hasBold = tempDiv.querySelectorAll('strong, b').length > 0;
+          const hasItalic = tempDiv.querySelectorAll('em, i').length > 0;
+          
+          if (hasBold || hasItalic) {
+            // Convert HTML to markdown syntax to preserve formatting
+            let formatted = bulletText;
+            
+            // Extract and preserve bold
+            tempDiv.querySelectorAll('strong, b').forEach(el => {
+              const boldText = el.textContent || '';
+              if (boldText && formatted.includes(boldText)) {
+                formatted = formatted.replace(boldText, `**${boldText}**`);
+              }
+            });
+            
+            // Extract and preserve italic
+            tempDiv.querySelectorAll('em, i').forEach(el => {
+              const italicText = el.textContent || '';
+              if (italicText && formatted.includes(italicText) && !formatted.includes(`**${italicText}**`)) {
+                formatted = formatted.replace(italicText, `*${italicText}*`);
+              }
+            });
+            
+            return formatted;
+          }
+          
+          // No formatting, just return text
+          return bulletText;
+        }
+        
+        // For skipped regular bullets, preserve formatting but add bullet point
+        if (wasSkipped) {
+          const hasBold = tempDiv.querySelectorAll('strong, b').length > 0;
+          const hasItalic = tempDiv.querySelectorAll('em, i').length > 0;
+          
+          if (hasBold || hasItalic) {
+            // Convert HTML to markdown
+            let formatted = bulletText;
+            
+            tempDiv.querySelectorAll('strong, b').forEach(el => {
+              const boldText = el.textContent || '';
+              if (boldText && formatted.includes(boldText)) {
+                formatted = formatted.replace(boldText, `**${boldText}**`);
+              }
+            });
+            
+            tempDiv.querySelectorAll('em, i').forEach(el => {
+              const italicText = el.textContent || '';
+              if (italicText && formatted.includes(italicText) && !formatted.includes(`**${italicText}**`)) {
+                formatted = formatted.replace(italicText, `*${italicText}*`);
+              }
+            });
+            
+            const indent = item.indent || 0;
+            const spaces = '  '.repeat(indent);
+            return `${spaces}• ${formatted}`;
+          }
+        }
+        
+        // For AI-improved bullets or non-formatted text, add bullet point
+        const indent = item.indent || 0;
+        const spaces = '  '.repeat(indent);
+        return `${spaces}• ${bulletText}`;
+      })
+      .filter(Boolean) // Remove null entries
+      .join('\n');
+    
+    // Update the section immediately with all content (processed + unprocessed)
+    onAccept(combinedContent);
 
     if (currentBulletIndex < bulletItems.length - 1) {
       // Move to next bullet
@@ -173,14 +363,6 @@ export function AIImproveDialog({
       improveBullet(bulletItems[nextIndex].content, nextIndex); // Use 'content' property
     } else {
       // All bullets processed
-      const combinedContent = improved
-        .map((bullet, idx) => {
-          const indent = bulletItems[idx].indent || 0;
-          const spaces = '  '.repeat(indent);
-          return `${spaces}• ${bullet}`;
-        })
-        .join('\n');
-      onAccept(combinedContent);
       onClose();
       toast.success('Content updated!');
     }
