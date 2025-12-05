@@ -154,7 +154,7 @@ interface SectionOrder {
 interface AIRewritePanelProps {
   originalResume: string;
   jobDescription: string;
-  onBack: () => void;
+  onBack: (currentResumeData?: any) => void;
   onNext: (optimizedResume: string) => void;
   onPreview: () => void;
   optimizationFlow: 'direct' | 'withJob';
@@ -1918,7 +1918,7 @@ export function AIRewritePanel({
             {/* Header */}
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">
-                <Button onClick={onBack} variant="ghost" size="sm">
+                <Button onClick={() => onBack(resumeData)} variant="ghost" size="sm">
                   <ArrowLeft className="w-4 h-4 mr-2" />
                   Back
                 </Button>

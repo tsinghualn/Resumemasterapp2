@@ -13,6 +13,7 @@ interface StartFromScratchDialogProps {
   onOpenChange: (open: boolean) => void;
   onSelectAIResumeBuilding: () => void;
   onSelectTailorForJob: () => void;
+  onCancel?: () => void;
 }
 
 export function StartFromScratchDialog({
@@ -20,9 +21,17 @@ export function StartFromScratchDialog({
   onOpenChange,
   onSelectAIResumeBuilding,
   onSelectTailorForJob,
+  onCancel,
 }: StartFromScratchDialogProps) {
+  
+  const handleClose = () => {
+    if (onCancel) {
+      onCancel();
+    }
+    onOpenChange(false);
+  };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="w-[50vw] max-w-[50vw] sm:w-[50vw] sm:max-w-[50vw]">
         <DialogHeader>
           <DialogTitle className="text-2xl flex items-center gap-2">
@@ -53,16 +62,17 @@ export function StartFromScratchDialog({
                 </p>
               </div>
             </div>
-            <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-              <div className="bg-purple-600 text-white text-xs px-3 py-1 rounded-full">
-                Recommended
-              </div>
-            </div>
           </button>
 
           {/* Tailor for Job Option */}
           <button
-            onClick={onSelectTailorForJob}
+            onClick={() => {
+              // Clear cache when switching to Tailor for Job
+              if (onCancel) {
+                onCancel();
+              }
+              onSelectTailorForJob();
+            }}
             className="group relative bg-gradient-to-br from-blue-50 to-green-50 hover:from-blue-100 hover:to-green-100 border-2 border-blue-200 hover:border-blue-400 rounded-xl p-6 transition-all duration-200 text-left"
           >
             <div className="flex items-start gap-4">
@@ -84,7 +94,7 @@ export function StartFromScratchDialog({
         <div className="pt-2 border-t">
           <Button
             variant="ghost"
-            onClick={() => onOpenChange(false)}
+            onClick={handleClose}
             className="w-full"
           >
             Cancel

@@ -94,6 +94,15 @@ export default function App() {
   // Cache for parsed resume data to avoid re-parsing
   const [cachedResumeData, setCachedResumeData] = useState<ResumeData | null>(null);
   
+  // Cache for resume changes when navigating back from AI Resume Optimization
+  const [cachedResumeChanges, setCachedResumeChanges] = useState<any>(null);
+  
+  // Cache for original resume content string (needed to restore AIRewritePanel)
+  const [cachedResumeContent, setCachedResumeContent] = useState<string>('');
+  
+  // Loading state to ensure data is ready before navigation
+  const [isRestoringCache, setIsRestoringCache] = useState(false);
+  
   // Track previous screen for dashboard "Go Back" button
   const [previousScreen, setPreviousScreen] = useState<Screen>('landing');
   
@@ -106,6 +115,23 @@ export default function App() {
   useEffect(() => {
     checkSession();
   }, []);
+  
+  // Handle restoration of cached resume data (with proper state synchronization)
+  useEffect(() => {
+    if (isRestoringCache && resumeContent && cachedResumeData) {
+      console.log('✅ [useEffect] Resume data fully restored, navigating to optimize screen');
+      console.log('  - resumeContent length:', resumeContent.length);
+      console.log('  - cachedResumeData exists:', !!cachedResumeData);
+      
+      // Clear the cache AFTER state is confirmed ready
+      setCachedResumeChanges(null);
+      setCachedResumeContent('');
+      
+      setIsRestoringCache(false);
+      setCurrentScreen('optimize');
+      setOptimizationFlow('direct');
+    }
+  }, [isRestoringCache, resumeContent, cachedResumeData]);
 
   // Determine if current user is admin (checks role from database)
   const isAdmin = isAdminUser(currentUser);
@@ -256,10 +282,45 @@ export default function App() {
     }
   };
 
+  const handleClearCachedChanges = () => {
+    // Clear cached resume changes when user cancels or switches to Tailor for Job
+    console.log('🧹 Clearing cached resume changes');
+    setCachedResumeChanges(null);
+  };
+
   const handleStartFromScratchAIBuilding = async () => {
     try {
       console.log('🎨 Starting AI Resume Building from scratch...');
+      console.log('🔍 Checking for cached resume changes...');
+      console.log('  - cachedResumeChanges exists:', !!cachedResumeChanges);
+      console.log('  - cachedResumeContent exists:', !!cachedResumeContent);
+      console.log('  - cachedResumeContent length:', cachedResumeContent?.length || 0);
+      console.log('  - resumeContent exists:', !!resumeContent);
+      console.log('  - resumeContent length:', resumeContent?.length || 0);
+      
       setStartFromScratchDialogOpen(false);
+      
+      // If we have cached resume changes, restore them
+      if (cachedResumeChanges && cachedResumeContent) {
+        console.log('📥 Restoring cached resume changes');
+        console.log('  - Cached form data structure:', Object.keys(cachedResumeChanges));
+        console.log('  - Restoring resume content with length:', cachedResumeContent.length);
+        
+        // Set loading state
+        setIsRestoringCache(true);
+        
+        // Restore the parsed form data
+        setCachedResumeData(cachedResumeChanges);
+        
+        // Restore the original resume content (CRITICAL for AIRewritePanel)
+        setResumeContent(cachedResumeContent);
+        
+        // DON'T clear the cache here - the useEffect will do it after state is ready
+        // The useEffect hook will handle navigation once state is ready
+        return;
+      }
+      
+      console.log('📝 No cached changes found, creating blank template');
       
       // Create blank template with no pre-filled values so placeholders show properly
       const blankTemplate = `YOUR NAME
@@ -309,8 +370,11 @@ SKILLS
         }
       }
       
-      // Navigate to AI Resume Optimization page
-      setCurrentScreen('optimize');
+      // Use setTimeout to ensure state updates complete before navigation
+      setTimeout(() => {
+        console.log('✅ Blank template created, navigating to optimize screen');
+        setCurrentScreen('optimize');
+      }, 50);
     } catch (error) {
       console.error('Error in handleStartFromScratchAIBuilding:', error);
       toast.error('Failed to start AI Resume Building', {
@@ -323,6 +387,13 @@ SKILLS
     try {
       console.log('🎯 Starting Tailor for Job from scratch...');
       setStartFromScratchDialogOpen(false);
+      
+      // If we're coming from the back button with cached changes, clear them
+      // since user is switching to Tailor for Job flow
+      if (cachedResumeChanges) {
+        console.log('🧹 Clearing cached resume changes (switching to Tailor for Job)');
+        setCachedResumeChanges(null);
+      }
       
       // Navigate to Job Description page
       setCurrentScreen('jobdesc');
@@ -485,8 +556,39 @@ SKILLS
     setOptimizationFlow('withJob');
   };
 
-  const handleBackToJobDesc = () => {
-    setCurrentScreen('landing'); // Navigate to homepage instead
+  const handleBackFromOptimize = (currentResumeData?: any) => {
+    // Save resume changes to cache
+    if (currentResumeData) {
+      console.log('💾 Saving resume changes to cache before navigating back');
+      console.log('💾 Saving data:', {
+        hasFormData: !!currentResumeData,
+        hasResumeContent: !!resumeContent,
+        resumeContentLength: resumeContent?.length || 0
+      });
+      
+      // Cache the form data (parsed resume sections)
+      setCachedResumeChanges(currentResumeData);
+      setCachedResumeData(currentResumeData);
+      
+      // Cache the original resume content string (critical for AIRewritePanel)
+      setCachedResumeContent(resumeContent);
+    }
+    
+    if (optimizationFlow === 'direct') {
+      // Scenario 1 & 3: User came from AI Resume Building (Start from Scratch or Upload Resume)
+      // Navigate to landing page first, then show the dialog
+      console.log('🔙 Back from AI Resume Building - navigating to landing and showing dialog');
+      setCurrentScreen('landing');
+      // Use setTimeout to ensure the screen changes before opening the dialog
+      setTimeout(() => {
+        setStartFromScratchDialogOpen(true);
+      }, 100);
+    } else {
+      // Scenario 2 & 4: User came from Tailor for Job -> Job Description
+      // Navigate back to Job Description page
+      console.log('🔙 Back to Job Description page');
+      setCurrentScreen('jobdesc');
+    }
   };
 
   const handleOptimizeNext = (optimizedResume: string) => {
@@ -891,11 +993,12 @@ CERTIFICATIONS
           onOpenChange={setStartFromScratchDialogOpen}
           onSelectAIResumeBuilding={handleStartFromScratchAIBuilding}
           onSelectTailorForJob={handleStartFromScratchTailorForJob}
+          onCancel={handleClearCachedChanges}
         />
         
         {/* Upload and Parse Resume Dialog */}
         <Dialog open={parseResumeDialogOpen} onOpenChange={setParseResumeDialogOpen}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[50vw] max-w-[50vw] sm:w-[50vw] sm:max-w-[50vw] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <div className="flex items-center gap-3 mb-2">
                 <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-2.5 rounded-xl">
@@ -912,7 +1015,11 @@ CERTIFICATIONS
                 key="resume-uploader-dialog" 
                 onResumeUpload={(content, fileName, parsedData) => {
                   handleResumeUpload(content, fileName, parsedData);
+                }}
+                onNext={() => {
+                  // Close upload dialog and show "Choose how you'd like to build your resume" dialog
                   setParseResumeDialogOpen(false);
+                  setStartFromScratchDialogOpen(true);
                 }}
                 onNavigateToOptimize={() => {
                   setCurrentScreen('optimize');
@@ -988,12 +1095,35 @@ CERTIFICATIONS
       jobDescriptionPreview: jobDescription?.substring(0, 100) || 'EMPTY'
     });
 
+    // Guard: Don't render AIRewritePanel if resumeContent is empty
+    if (!resumeContent) {
+      console.error('❌ [App.tsx] Cannot render AIRewritePanel - resumeContent is empty!');
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-4 rounded-xl inline-block mb-4">
+              <FileText className="w-12 h-12 text-white animate-pulse" />
+            </div>
+            <p className="text-lg text-gray-600">Loading resume data...</p>
+            <p className="text-sm text-gray-500 mt-2">If this persists, please go back and try again</p>
+            <Button 
+              onClick={() => setCurrentScreen('landing')} 
+              className="mt-4"
+              variant="outline"
+            >
+              Go Back to Home
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <>
         <AIRewritePanel
           originalResume={resumeContent}
           jobDescription={jobDescription}
-          onBack={handleBackToJobDesc}
+          onBack={handleBackFromOptimize}
           onNext={handleOptimizeNext}
           onPreview={() => setCurrentScreen('preview')}
           optimizationFlow={optimizationFlow}

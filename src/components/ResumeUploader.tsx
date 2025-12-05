@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Button } from './ui/button';
-import { Upload, FileText, CheckCircle2, Sparkles, Briefcase } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, Sparkles, Briefcase, RotateCcw, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { generateParsingGuidance, getFeedbackStats } from '../utils/feedbackAnalyzer';
@@ -11,6 +11,7 @@ interface ResumeUploaderProps {
   onResumeUpload: (content: string, fileName: string, parsedData?: ResumeData) => void;
   onNavigateToOptimize?: () => void;
   onNavigateToJobDesc?: () => void;
+  onNext?: () => void; // New prop for showing the dialog
 }
 
 interface ResumeData {
@@ -52,7 +53,7 @@ interface ResumeData {
   customSections?: Array<{ id: string; title: string; content: string; icon: any }>;
 }
 
-export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigateToJobDesc }: ResumeUploaderProps) {
+export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigateToJobDesc, onNext }: ResumeUploaderProps) {
   const [fileName, setFileName] = useState<string>('');
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); // Combined processing state
@@ -662,6 +663,36 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
     }
   };
 
+  const handleReupload = () => {
+    // Clear all state and allow re-upload
+    setFileName('');
+    setIsProcessing(false);
+    setProgress(0);
+    setProgressStage('uploading');
+    setIsComplete(false);
+    setParsedData(null);
+    setResumeContent('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    toast.info('Ready to upload a new resume');
+  };
+
+  const handleNext = () => {
+    if (!parsedData || !resumeContent) {
+      toast.error('Resume data not ready. Please wait for parsing to complete.');
+      return;
+    }
+    
+    // Save the parsed data and content before showing dialog
+    onResumeUpload(resumeContent, fileName, parsedData);
+    
+    // Show the dialog
+    if (onNext) {
+      onNext();
+    }
+  };
+
   return (
     <Card className="p-6">
       {!fileName && !isProcessing && !isComplete ? (
@@ -758,30 +789,27 @@ export function ResumeUploader({ onResumeUpload, onNavigateToOptimize, onNavigat
                     <span className="text-lg">✓</span>
                   </div>
                   <span className="font-medium">
-                    Great! We have parsed your resume successfully.
+                    Great, we have uploaded and parsed your resume successfully!
                   </span>
                 </div>
                 
                 <div className="pt-4 border-t border-blue-200">
-                  <p className="text-sm text-gray-700 mb-4">
-                    What would you like to do next?
-                  </p>
-                  
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <Button
-                      onClick={handleNavigateToAIOptimization}
-                      className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                      onClick={handleReupload}
+                      variant="outline"
+                      className="border-gray-300 hover:border-gray-400"
                     >
-                      <Sparkles className="w-4 h-4 mr-2" />
-                      AI Resume Building
+                      <RotateCcw className="w-4 h-4 mr-2" />
+                      Re-upload
                     </Button>
                     
                     <Button
-                      onClick={handleNavigateToJobDescription}
-                      className="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white"
+                      onClick={handleNext}
+                      className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
                     >
-                      <Briefcase className="w-4 h-4 mr-2" />
-                      Tailor for Job
+                      <ArrowRight className="w-4 h-4 mr-2" />
+                      Next
                     </Button>
                   </div>
                 </div>
